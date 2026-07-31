@@ -1,0 +1,190 @@
+@import 'tailwindcss';
+
+:root {
+  --bg: oklch(0.985 0 0);
+  --surface: oklch(0.965 0.006 110);
+  --surface-strong: oklch(0.93 0.01 110);
+  --line: oklch(0.885 0.008 110);
+  --ink: oklch(0.19 0.018 110);
+  --muted: oklch(0.45 0.018 110);
+  --primary: oklch(0.53 0.115 110);
+  --primary-hover: oklch(0.47 0.105 110);
+  --primary-soft: oklch(0.92 0.045 110);
+  --primary-ink: oklch(0.32 0.07 110);
+  --focus: oklch(0.72 0.12 110 / 0.45);
+  --success: oklch(0.37 0.1 148);
+  --success-soft: oklch(0.94 0.035 148);
+  --warning: oklch(0.39 0.09 70);
+  --warning-soft: oklch(0.95 0.05 80);
+  --error: oklch(0.45 0.15 28);
+  --error-soft: oklch(0.95 0.035 28);
+}
+
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  text-rendering: optimizeLegibility;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+
+.nav-link {
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.8rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition:
+    color 180ms ease-out,
+    background-color 180ms ease-out;
+}
+.nav-link:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+.nav-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+.nav-link-active {
+  color: var(--ink);
+}
+
+.search-shell {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: white;
+  box-shadow: 0 4px 8px oklch(0.2 0.02 110 / 0.08);
+}
+.search-shell:focus-within {
+  border-color: var(--primary);
+}
+
+.filter-button {
+  border-radius: 999px;
+  padding: 0.42rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  transition:
+    background-color 180ms ease-out,
+    color 180ms ease-out;
+}
+.filter-button:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+.filter-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+.filter-button-active {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.recommendation-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: 0.75rem;
+  background: white;
+  padding: 1rem;
+  text-align: left;
+  transition:
+    background-color 180ms ease-out,
+    transform 180ms ease-out;
+}
+.recommendation-row:hover {
+  background: var(--primary-soft);
+  transform: translateY(-1px);
+}
+.recommendation-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.85rem 0;
+  color: var(--muted);
+  text-align: left;
+  font-size: 0.875rem;
+}
+.history-row:hover {
+  color: var(--ink);
+}
+.history-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.provider-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  padding: 0.35rem 0.65rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.skeleton {
+  border-radius: 0.4rem;
+  background: linear-gradient(
+    90deg,
+    var(--surface) 20%,
+    var(--surface-strong) 50%,
+    var(--surface) 80%
+  );
+  background-size: 240% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

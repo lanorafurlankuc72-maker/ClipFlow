@@ -1,0 +1,23 @@
+{
+  "name": "clipflow",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @clipflow/providers build && concurrently -n web,api -c blue,green \"pnpm --filter @clipflow/web dev\" \"pnpm --filter @clipflow/api dev\"",
+    "build": "pnpm --filter @clipflow/providers build && pnpm --filter @clipflow/api build && pnpm --filter @clipflow/web build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm --filter @clipflow/providers build && pnpm -r typecheck",
+    "test": "pnpm --filter @clipflow/providers build && pnpm -r --if-present test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "concurrently": "9.2.1",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2"
+  }
+}
