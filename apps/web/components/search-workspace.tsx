@@ -10,14 +10,21 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   Menu,
-  Play,
   Search,
   Settings2,
   Sparkles,
   X,
 } from 'lucide-react';
 import Image from 'next/image';
-import { FormEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  FormEvent,
+  KeyboardEvent,
+  MouseEvent,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -94,68 +101,89 @@ function ProviderBadge({ status }: { status: ProviderStatus }) {
 
 function VideoPreview({ asset }: { asset: Asset }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const seekFrameRef = useRef<number | null>(null);
+  const pendingTimeRef = useRef(0);
+  const [progress, setProgress] = useState(0);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [duration, setDuration] = useState(asset.duration ?? 0);
 
-  async function playPreview(ignoreReducedMotion = false) {
-    if (!ignoreReducedMotion && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      return;
-    }
-    try {
-      await videoRef.current?.play();
-    } catch {
-      setIsPlaying(false);
-    }
-  }
+  useEffect(
+    () => () => {
+      if (seekFrameRef.current !== null) cancelAnimationFrame(seekFrameRef.current);
+    },
+    [],
+  );
 
-  function stopPreview() {
+  function seekTo(nextProgress: number) {
     const video = videoRef.current;
-    if (!video) return;
-    video.pause();
-    video.currentTime = 0;
+    if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
+
+    const normalizedProgress = Math.min(1, Math.max(0, nextProgress));
+    setProgress(normalizedProgress);
+    pendingTimeRef.current = normalizedProgress * video.duration;
+
+    if (seekFrameRef.current !== null) return;
+    seekFrameRef.current = requestAnimationFrame(() => {
+      if (videoRef.current) videoRef.current.currentTime = pendingTimeRef.current;
+      seekFrameRef.current = null;
+    });
   }
 
-  function togglePreview() {
-    if (videoRef.current?.paused) void playPreview(true);
-    else stopPreview();
+  function scrubFromMouse(event: MouseEvent<HTMLDivElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    seekTo((event.clientX - bounds.left) / bounds.width);
   }
+
+  function scrubFromKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    setIsPreviewing(true);
+    seekTo(progress + (event.key === 'ArrowRight' ? 0.05 : -0.05));
+  }
+
+  const previewSeconds = Math.round(duration * progress);
 
   return (
     <div
-      className="relative"
-      onMouseEnter={() => void playPreview()}
-      onMouseLeave={stopPreview}
-      onFocus={() => void playPreview()}
-      onBlur={stopPreview}
+      className="relative cursor-ew-resize outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-white/90"
+      tabIndex={0}
+      role="slider"
+      aria-label={`${asset.title} 视频预览进度`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(progress * 100)}
+      aria-valuetext={`${previewSeconds} 秒`}
+      onMouseEnter={() => setIsPreviewing(true)}
+      onMouseMove={scrubFromMouse}
+      onMouseLeave={() => setIsPreviewing(false)}
+      onKeyDown={scrubFromKeyboard}
+      onBlur={() => setIsPreviewing(false)}
     >
       <video
         ref={videoRef}
         src={asset.previewUrl}
         poster={asset.thumbnailUrl}
         muted
-        loop
         playsInline
         preload="metadata"
-        aria-label={`${asset.title} 视频预览`}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        aria-hidden="true"
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
         className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
         style={{ aspectRatio: `${asset.width || 16} / ${asset.height || 9}` }}
       />
-      <button
-        type="button"
-        onClick={togglePreview}
+      <div
         className={cn(
-          'absolute left-1/2 top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/65 text-white shadow-sm transition-opacity focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-white/80',
-          isPlaying ? 'opacity-0 group-hover:opacity-100 focus:opacity-100' : 'opacity-100',
+          'pointer-events-none absolute inset-x-0 top-0 transition-opacity duration-150',
+          isPreviewing ? 'opacity-100' : 'opacity-0',
         )}
-        aria-label={isPlaying ? `暂停 ${asset.title}` : `预览 ${asset.title}`}
       >
-        {isPlaying ? (
-          <span className="text-xs font-semibold">暂停</span>
-        ) : (
-          <Play size={18} fill="currentColor" />
-        )}
-      </button>
+        <div className="h-1 bg-white/35">
+          <div className="h-full bg-white" style={{ width: `${progress * 100}%` }} />
+        </div>
+        <span className="absolute left-2 top-2 rounded-md bg-black/65 px-2 py-1 text-[11px] font-semibold text-white">
+          左右移动预览 · {previewSeconds}s
+        </span>
+      </div>
     </div>
   );
 }
@@ -176,13 +204,13 @@ function AssetCard({ asset }: { asset: Asset }) {
             className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
           />
         )}
-        <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-linear-to-t from-black/70 to-transparent p-3 pt-10 text-white">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-linear-to-t from-black/70 to-transparent p-3 pt-10 text-white">
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold capitalize">
             {asset.type === 'video' ? <Film size={14} /> : <ImageIcon size={14} />}
             {asset.provider}
             {asset.duration ? ` · ${asset.duration}s` : ''}
           </span>
-          <div className="flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+          <div className="pointer-events-auto flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
             <Button
               size="icon"
               variant="secondary"
