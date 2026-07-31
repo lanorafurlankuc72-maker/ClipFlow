@@ -5,6 +5,7 @@ export interface SearchAnalysis {
   provider: 'openai' | 'deepseek' | null;
   searchQuery: string;
   keywords: string[];
+  searchQueries: string[];
 }
 
 interface ChatCompletionResponse {
@@ -23,7 +24,14 @@ export async function analyzeSearchQuery(
   type: SearchAssetType,
 ): Promise<SearchAnalysis> {
   const provider = resolveProvider();
-  if (!provider) return { usedAi: false, provider: null, searchQuery: query, keywords: [] };
+  if (!provider)
+    return {
+      usedAi: false,
+      provider: null,
+      searchQuery: query,
+      keywords: [],
+      searchQueries: createQueryVariants(query, []),
+    };
 
   const isOpenAi = provider === 'openai';
   const apiKey = isOpenAi ? process.env.OPENAI_API_KEY : process.env.DEEPSEEK_API_KEY;
@@ -68,8 +76,33 @@ export async function analyzeSearchQuery(
     const keywords = Array.isArray(parsed.keywords)
       ? parsed.keywords.filter((item): item is string => typeof item === 'string').slice(0, 8)
       : [];
-    return { usedAi: true, provider, searchQuery, keywords };
+    return {
+      usedAi: true,
+      provider,
+      searchQuery,
+      keywords,
+      searchQueries: createQueryVariants(searchQuery, keywords),
+    };
   } catch {
-    return { usedAi: false, provider: null, searchQuery: query, keywords: [] };
+    return {
+      usedAi: false,
+      provider: null,
+      searchQuery: query,
+      keywords: [],
+      searchQueries: createQueryVariants(query, []),
+    };
   }
+}
+
+function createQueryVariants(searchQuery: string, keywords: string[]): string[] {
+  const normalized = searchQuery.trim();
+  const groups = normalized
+    .split(/[,，;；|/]+/)
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 2);
+  const keywordVariants = keywords
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 2)
+    .slice(0, 2);
+  return [...new Set([normalized, ...groups, ...keywordVariants])].slice(0, 3);
 }

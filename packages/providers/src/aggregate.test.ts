@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { aggregateSearch } from './aggregate.js';
 import type { Asset, SearchProvider } from './types.js';
 
@@ -53,6 +53,19 @@ describe('aggregateSearch', () => {
       page: 1,
       perPage: 12,
     });
+    expect(result.assets).toHaveLength(1);
+  });
+
+  it('merges up to three query variants without duplicate assets', async () => {
+    const search = vi.fn(async () => [asset]);
+    const result = await aggregateSearch([provider({ search })], {
+      query: 'city aerial',
+      queries: ['city aerial', 'night skyline', 'drone footage', 'ignored'],
+      type: 'image',
+      page: 1,
+      perPage: 12,
+    });
+    expect(search).toHaveBeenCalledTimes(3);
     expect(result.assets).toHaveLength(1);
   });
 });

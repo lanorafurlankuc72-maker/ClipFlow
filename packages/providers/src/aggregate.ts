@@ -56,7 +56,10 @@ export async function aggregateSearch(
         };
       }
       try {
-        const assets = await provider.search(request);
+        const queries = [...new Set([request.query, ...(request.queries ?? [])])].slice(0, 3);
+        const assets = (
+          await Promise.all(queries.map((query) => provider.search({ ...request, query })))
+        ).flat();
         return {
           assets,
           status: { provider: provider.name, status: 'ok', count: assets.length },

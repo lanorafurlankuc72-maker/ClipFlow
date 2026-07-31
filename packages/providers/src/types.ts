@@ -6,6 +6,7 @@ export type SearchAssetType = AssetType | 'all';
 
 export interface SearchRequest {
   query: string;
+  queries?: string[];
   type: SearchAssetType;
   page: number;
   perPage: number;
@@ -51,6 +52,7 @@ export interface SearchResult {
     provider: 'openai' | 'deepseek' | null;
     searchQuery: string;
     keywords: string[];
+    searchQueries?: string[];
   };
 }
 
