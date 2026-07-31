@@ -121,8 +121,25 @@ function VideoPreview({ asset }: { asset: Asset }) {
     const normalizedProgress = Math.min(1, Math.max(0, nextProgress));
     setProgress(normalizedProgress);
     pendingTimeRef.current = normalizedProgress * video.duration;
+    if (!video.seeking) video.currentTime = pendingTimeRef.current;
+  }
 
-    if (seekFrameRef.current !== null) return;
+  async function activatePreview() {
+    setIsPreviewing(true);
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      await video.play();
+      video.pause();
+    } catch {
+      // Seeking still works when autoplay is unavailable.
+    }
+  }
+
+  function continuePendingSeek() {
+    const video = videoRef.current;
+    if (!video || Math.abs(video.currentTime - pendingTimeRef.current) < 0.04) return;
+    if (seekFrameRef.current !== null) cancelAnimationFrame(seekFrameRef.current);
     seekFrameRef.current = requestAnimationFrame(() => {
       if (videoRef.current) videoRef.current.currentTime = pendingTimeRef.current;
       seekFrameRef.current = null;
@@ -153,7 +170,7 @@ function VideoPreview({ asset }: { asset: Asset }) {
       aria-valuemax={100}
       aria-valuenow={Math.round(progress * 100)}
       aria-valuetext={`${previewSeconds} 秒`}
-      onMouseEnter={() => setIsPreviewing(true)}
+      onMouseEnter={() => void activatePreview()}
       onMouseMove={scrubFromMouse}
       onMouseLeave={() => setIsPreviewing(false)}
       onKeyDown={scrubFromKeyboard}
@@ -162,12 +179,13 @@ function VideoPreview({ asset }: { asset: Asset }) {
       <video
         ref={videoRef}
         src={asset.previewUrl}
-        poster={asset.thumbnailUrl}
+        poster={isPreviewing ? undefined : asset.thumbnailUrl}
         muted
         playsInline
         preload="metadata"
         aria-hidden="true"
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+        onSeeked={continuePendingSeek}
         className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
         style={{ aspectRatio: `${asset.width || 16} / ${asset.height || 9}` }}
       />
