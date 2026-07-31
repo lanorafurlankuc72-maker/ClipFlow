@@ -16,6 +16,7 @@ import {
 import {
   BillingNotConfiguredError,
   billingConfigured,
+  createBillingPortalSession,
   createCheckoutSession,
   InvalidWebhookSignatureError,
   isPaidSubscription,
@@ -52,6 +53,10 @@ const projectSchema = z.object({
   name: z.string().trim().min(1, '项目名称不能为空').max(80),
   description: z.string().trim().max(300).default(''),
 });
+const projectUpdateSchema = projectSchema
+  .partial()
+  .refine((value) => value.name || value.description !== undefined);
+const bulkAssetsSchema = z.object({ assets: z.array(assetSchema).min(1).max(100) });
 
 const credentialsSchema = z.object({
   email: z
@@ -74,7 +79,9 @@ export function createApp(options: CreateAppOptions = {}) {
   const analysisCache = new Map<string, SearchAnalysis>();
 
   app.disable('x-powered-by');
-  app.use(cors({ origin: webOrigin, methods: ['GET', 'POST', 'DELETE'], credentials: true }));
+  app.use(
+    cors({ origin: webOrigin, methods: ['GET', 'POST', 'PATCH', 'DELETE'], credentials: true }),
+  );
 
   app.post(
     '/billing/webhook',
@@ -94,6 +101,31 @@ export function createApp(options: CreateAppOptions = {}) {
               session.subscription,
             );
           }
+        } else if (
+          [
+            'customer.subscription.created',
+            'customer.subscription.updated',
+            'customer.subscription.deleted',
+          ].includes(event.type)
+        ) {
+          const subscription = event.data.object;
+          database.updateSubscriptionByStripeReference(
+            subscription.id,
+            subscription.customer ?? undefined,
+            event.type === 'customer.subscription.deleted'
+              ? 'canceled'
+              : (subscription.status ?? 'inactive'),
+            subscription.current_period_end
+              ? new Date(subscription.current_period_end * 1000).toISOString()
+              : undefined,
+          );
+        } else if (event.type === 'invoice.payment_failed') {
+          const invoice = event.data.object;
+          database.updateSubscriptionByStripeReference(
+            invoice.subscription ?? undefined,
+            invoice.customer ?? undefined,
+            'past_due',
+          );
         }
         response.json({ received: true });
       } catch (error) {
@@ -156,6 +188,15 @@ export function createApp(options: CreateAppOptions = {}) {
     response.json({
       configured: billingConfigured(),
       user: currentUser(database, request) ?? null,
+      plans: {
+        free: { label: '免费版', projectLimit: 3, assetsPerProject: 100 },
+        pro: {
+          label: '商业版',
+          priceLabel: process.env.STRIPE_PRICE_LABEL ?? '价格以付款页面为准',
+          projectLimit: null,
+          assetsPerProject: null,
+        },
+      },
     });
   });
 
@@ -169,6 +210,27 @@ export function createApp(options: CreateAppOptions = {}) {
       const session = await createCheckoutSession(user);
       if (!session.url) throw new StripeApiError('Stripe 未返回付款地址');
       response.json({ url: session.url });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/billing/portal', async (request, response, next) => {
+    try {
+      const user = currentUser(database, request);
+      if (!user) {
+        response.status(401).json({ error: 'unauthorized', message: '请先登录' });
+        return;
+      }
+      if (!user.stripeCustomerId) {
+        response
+          .status(400)
+          .json({ error: 'no_subscription', message: '当前账号没有可管理的订阅' });
+        return;
+      }
+      const portal = await createBillingPortalSession(user.stripeCustomerId);
+      if (!portal.url) throw new StripeApiError('Stripe 未返回订阅管理地址');
+      response.json({ url: portal.url });
     } catch (error) {
       next(error);
     }
@@ -208,8 +270,10 @@ export function createApp(options: CreateAppOptions = {}) {
       const result = await aggregateSearch(createProviderRegistry(), {
         ...input,
         query: analysis.searchQuery,
+        queries: analysis.searchQueries,
       });
-      if (input.page === 1) database.recordSearch(input.query, analysis.searchQuery);
+      if (input.page === 1)
+        database.recordSearch(input.query, analysis.searchQuery, ownerId(database, request));
       response.json({ ...result, query: input.query, analysis });
     } catch (error) {
       next(error);
@@ -219,14 +283,14 @@ export function createApp(options: CreateAppOptions = {}) {
   app.post('/search', searchHandler);
   app.post('/api/search', searchHandler);
 
-  app.get('/favorites', (_request, response) => {
-    response.json({ assets: database.listFavorites() });
+  app.get('/favorites', (request, response) => {
+    response.json({ assets: database.listFavorites(ownerId(database, request)) });
   });
 
   app.post('/favorite', (request, response, next) => {
     try {
       const asset = assetSchema.parse(request.body);
-      response.status(201).json({ asset: database.addFavorite(asset) });
+      response.status(201).json({ asset: database.addFavorite(asset, ownerId(database, request)) });
     } catch (error) {
       next(error);
     }
@@ -234,35 +298,41 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.delete('/favorite/:assetId', (request, response) => {
     const assetId = z.string().min(1).max(300).parse(request.params.assetId);
-    response.json({ removed: database.removeFavorite(assetId) });
+    response.json({ removed: database.removeFavorite(assetId, ownerId(database, request)) });
   });
 
   app.post('/download', (request, response, next) => {
     try {
       const asset = assetSchema.parse(request.body);
-      const download = database.recordDownload(asset);
+      const download = database.recordDownload(asset, ownerId(database, request));
       response.status(201).json({ download, downloadUrl: asset.contentUrl });
     } catch (error) {
       next(error);
     }
   });
 
-  app.get('/downloads', (_request, response) => {
-    response.json({ downloads: database.listDownloads() });
+  app.get('/downloads', (request, response) => {
+    response.json({ downloads: database.listDownloads(50, ownerId(database, request)) });
   });
 
-  app.get('/history', (_request, response) => {
-    response.json({ history: database.listSearchHistory() });
+  app.get('/history', (request, response) => {
+    response.json({ history: database.listSearchHistory(20, ownerId(database, request)) });
   });
 
-  app.get('/project', (_request, response) => {
-    response.json({ projects: database.listProjects() });
+  app.get('/project', (request, response) => {
+    response.json({ projects: database.listProjects(ownerId(database, request)) });
   });
 
   app.post('/project', (request, response, next) => {
     try {
       const input = projectSchema.parse(request.body);
-      const project = database.createProject(randomUUID(), input.name, input.description);
+      const user = currentUser(database, request);
+      const userId = user?.id ?? 'guest';
+      if (user?.plan !== 'pro' && database.listProjects(userId).length >= 3) {
+        response.status(403).json({ error: 'plan_limit', message: '免费版最多创建 3 个项目' });
+        return;
+      }
+      const project = database.createProject(randomUUID(), input.name, input.description, userId);
       response.status(201).json({ project });
     } catch (error) {
       next(error);
@@ -271,21 +341,106 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.get('/project/:projectId', (request, response, next) => {
     try {
-      response.json({ project: database.getProject(String(request.params.projectId)) });
+      response.json({
+        project: database.getProject(String(request.params.projectId), ownerId(database, request)),
+      });
     } catch (error) {
       next(error);
     }
   });
 
   app.delete('/project/:projectId', (request, response) => {
-    response.json({ removed: database.deleteProject(String(request.params.projectId)) });
+    response.json({
+      removed: database.deleteProject(String(request.params.projectId), ownerId(database, request)),
+    });
+  });
+
+  app.patch('/project/:projectId', (request, response, next) => {
+    try {
+      const current = database.getProject(
+        String(request.params.projectId),
+        ownerId(database, request),
+      );
+      const input = projectUpdateSchema.parse(request.body);
+      const project = database.updateProject(
+        current.id,
+        input.name ?? current.name,
+        input.description ?? current.description,
+        ownerId(database, request),
+      );
+      response.json({ project });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/project/:projectId/export', (request, response, next) => {
+    try {
+      const project = database.getProject(
+        String(request.params.projectId),
+        ownerId(database, request),
+      );
+      response.setHeader(
+        'Content-Disposition',
+        `attachment; filename="clipflow-${project.id}.json"`,
+      );
+      response.json({ version: 1, exportedAt: new Date().toISOString(), project });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/project/:projectId/assets', (request, response, next) => {
     try {
       const asset = assetSchema.parse(request.body);
-      const project = database.addProjectAsset(String(request.params.projectId), asset);
+      const userId = ownerId(database, request);
+      const user = currentUser(database, request);
+      const current = database.getProject(String(request.params.projectId), userId);
+      if (user?.plan !== 'pro' && current.assetCount >= 100) {
+        response
+          .status(403)
+          .json({ error: 'plan_limit', message: '免费版每个项目最多保存 100 条素材' });
+        return;
+      }
+      const project = database.addProjectAsset(String(request.params.projectId), asset, userId);
       response.status(201).json({ project });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/project/:projectId/assets/bulk', (request, response, next) => {
+    try {
+      const input = bulkAssetsSchema.parse(request.body);
+      const userId = ownerId(database, request);
+      const user = currentUser(database, request);
+      const current = database.getProject(String(request.params.projectId), userId);
+      const existingIds = new Set(current.assets.map((asset) => asset.id));
+      const newAssetCount = new Set(
+        input.assets.filter((asset) => !existingIds.has(asset.id)).map((asset) => asset.id),
+      ).size;
+      if (user?.plan !== 'pro' && current.assetCount + newAssetCount > 100) {
+        response
+          .status(403)
+          .json({ error: 'plan_limit', message: '免费版每个项目最多保存 100 条素材' });
+        return;
+      }
+      response.status(201).json({
+        project: database.addProjectAssets(String(request.params.projectId), input.assets, userId),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/project/:projectId/assets', (request, response, next) => {
+    try {
+      response.json({
+        project: database.clearProjectAssets(
+          String(request.params.projectId),
+          ownerId(database, request),
+        ),
+      });
     } catch (error) {
       next(error);
     }
@@ -296,6 +451,7 @@ export function createApp(options: CreateAppOptions = {}) {
       const project = database.removeProjectAsset(
         String(request.params.projectId),
         String(request.params.assetId),
+        ownerId(database, request),
       );
       response.json({ project });
     } catch (error) {
@@ -349,4 +505,8 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   return app;
+}
+
+function ownerId(database: ClipFlowDatabase, request: Request): string {
+  return currentUser(database, request)?.id ?? 'guest';
 }

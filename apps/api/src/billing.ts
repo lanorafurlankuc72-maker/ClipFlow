@@ -9,6 +9,7 @@ interface StripeCheckoutSession {
   client_reference_id?: string | null;
   customer?: string | null;
   subscription?: string | null;
+  current_period_end?: number | null;
 }
 
 export function billingConfigured(): boolean {
@@ -41,6 +42,15 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
   return stripeRequest<StripeCheckoutSession>(
     `/checkout/sessions/${encodeURIComponent(sessionId)}`,
   );
+}
+
+export async function createBillingPortalSession(customerId: string): Promise<{ url?: string }> {
+  if (!process.env.STRIPE_SECRET_KEY) throw new BillingNotConfiguredError();
+  const appUrl = (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+  return stripeRequest<{ url?: string }>('/billing_portal/sessions', {
+    method: 'POST',
+    body: new URLSearchParams({ customer: customerId, return_url: appUrl }),
+  });
 }
 
 export function isPaidSubscription(session: StripeCheckoutSession): boolean {

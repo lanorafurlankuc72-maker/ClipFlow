@@ -22,6 +22,12 @@ function createTestApp() {
   return createApp({ databasePath: ':memory:' });
 }
 
+function stripeSignature(body: string, secret = 'whsec_test_secret') {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
+  return `t=${timestamp},v1=${signature}`;
+}
+
 describe('ClipFlow API', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -110,6 +116,28 @@ describe('ClipFlow API', () => {
     expect(removed.body.removed).toBe(true);
   });
 
+  it('updates, bulk-manages and exports a project', async () => {
+    const app = createTestApp();
+    const created = await request(app).post('/project').send({ name: 'Draft' });
+    const projectId = String(created.body.project.id);
+    const updated = await request(app)
+      .patch(`/project/${projectId}`)
+      .send({ name: 'Campaign', description: 'Autumn launch' });
+    expect(updated.body.project).toMatchObject({ name: 'Campaign', description: 'Autumn launch' });
+
+    const bulk = await request(app)
+      .post(`/project/${projectId}/assets/bulk`)
+      .send({ assets: [testAsset] });
+    expect(bulk.body.project.assetCount).toBe(1);
+
+    const exported = await request(app).get(`/project/${projectId}/export`);
+    expect(exported.body.project.assets).toEqual([testAsset]);
+    expect(exported.headers['content-disposition']).toContain('attachment');
+
+    const cleared = await request(app).delete(`/project/${projectId}/assets`);
+    expect(cleared.body.project.assetCount).toBe(0);
+  });
+
   it('returns 404 for a missing project', async () => {
     const response = await request(createTestApp()).get('/project/missing');
     expect(response.status).toBe(404);
@@ -165,6 +193,32 @@ describe('ClipFlow API', () => {
     expect(checkout.body.error).toBe('billing_not_configured');
   });
 
+  it('isolates saved data between signed-in accounts', async () => {
+    const app = createTestApp();
+    const first = request.agent(app);
+    const second = request.agent(app);
+    await first
+      .post('/auth/register')
+      .send({ email: 'first@clipflow.test', password: 'secure-pass-123' });
+    await second
+      .post('/auth/register')
+      .send({ email: 'second@clipflow.test', password: 'secure-pass-123' });
+
+    await first.post('/favorite').send(testAsset);
+    const project = await first.post('/project').send({ name: 'Private project' });
+    await first.post(`/project/${project.body.project.id}/assets`).send(testAsset);
+    expect((await first.get('/favorites')).body.assets).toHaveLength(1);
+    expect((await second.get('/favorites')).body.assets).toEqual([]);
+    expect((await second.get('/project')).body.projects).toEqual([]);
+    expect((await second.get(`/project/${project.body.project.id}`)).status).toBe(404);
+    expect(
+      (await second.delete(`/project/${project.body.project.id}/assets/${testAsset.id}`)).status,
+    ).toBe(404);
+    expect((await first.get(`/project/${project.body.project.id}`)).body.project.assetCount).toBe(
+      1,
+    );
+  });
+
   it('verifies Stripe webhook signatures before upgrading an account', async () => {
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test_secret');
     const app = createTestApp();
@@ -185,16 +239,30 @@ describe('ClipFlow API', () => {
         },
       },
     });
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const signature = createHmac('sha256', 'whsec_test_secret')
-      .update(`${timestamp}.${body}`)
-      .digest('hex');
     const webhook = await request(app)
       .post('/billing/webhook')
       .set('Content-Type', 'application/json')
-      .set('Stripe-Signature', `t=${timestamp},v1=${signature}`)
+      .set('Stripe-Signature', stripeSignature(body))
       .send(body);
     expect(webhook.status).toBe(200);
     expect((await agent.get('/auth/me')).body.user.plan).toBe('pro');
+
+    const canceledBody = JSON.stringify({
+      type: 'customer.subscription.deleted',
+      data: { object: { id: 'sub_test', customer: 'cus_test', status: 'canceled' } },
+    });
+    expect(
+      (
+        await request(app)
+          .post('/billing/webhook')
+          .set('Content-Type', 'application/json')
+          .set('Stripe-Signature', stripeSignature(canceledBody))
+          .send(canceledBody)
+      ).status,
+    ).toBe(200);
+    expect((await agent.get('/auth/me')).body.user).toMatchObject({
+      plan: 'free',
+      subscriptionStatus: 'canceled',
+    });
   });
 });
