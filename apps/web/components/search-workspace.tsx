@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   Menu,
+  Play,
   Search,
   Settings2,
   Sparkles,
@@ -23,6 +24,7 @@ import { cn } from '@/lib/utils';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const HISTORY_KEY = 'clipflow-search-history';
+const PAGE_SIZE = 24;
 
 const popularSearches = ['城市航拍夜景', '商务会议握手', '新能源汽车工厂', '咖啡制作特写'];
 const recommendations = [
@@ -90,18 +92,90 @@ function ProviderBadge({ status }: { status: ProviderStatus }) {
   );
 }
 
+function VideoPreview({ asset }: { asset: Asset }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  async function playPreview(ignoreReducedMotion = false) {
+    if (!ignoreReducedMotion && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+    try {
+      await videoRef.current?.play();
+    } catch {
+      setIsPlaying(false);
+    }
+  }
+
+  function stopPreview() {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    video.currentTime = 0;
+  }
+
+  function togglePreview() {
+    if (videoRef.current?.paused) void playPreview(true);
+    else stopPreview();
+  }
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => void playPreview()}
+      onMouseLeave={stopPreview}
+      onFocus={() => void playPreview()}
+      onBlur={stopPreview}
+    >
+      <video
+        ref={videoRef}
+        src={asset.previewUrl}
+        poster={asset.thumbnailUrl}
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        aria-label={`${asset.title} 视频预览`}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
+        style={{ aspectRatio: `${asset.width || 16} / ${asset.height || 9}` }}
+      />
+      <button
+        type="button"
+        onClick={togglePreview}
+        className={cn(
+          'absolute left-1/2 top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/65 text-white shadow-sm transition-opacity focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-white/80',
+          isPlaying ? 'opacity-0 group-hover:opacity-100 focus:opacity-100' : 'opacity-100',
+        )}
+        aria-label={isPlaying ? `暂停 ${asset.title}` : `预览 ${asset.title}`}
+      >
+        {isPlaying ? (
+          <span className="text-xs font-semibold">暂停</span>
+        ) : (
+          <Play size={18} fill="currentColor" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 function AssetCard({ asset }: { asset: Asset }) {
   return (
     <article className="group mb-4 break-inside-avoid overflow-hidden rounded-xl bg-white">
       <div className="relative overflow-hidden bg-[var(--surface)]">
-        <Image
-          src={asset.thumbnailUrl}
-          alt={asset.title}
-          width={asset.width || 800}
-          height={asset.height || 600}
-          unoptimized={asset.type === 'gif'}
-          className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
-        />
+        {asset.type === 'video' ? (
+          <VideoPreview asset={asset} />
+        ) : (
+          <Image
+            src={asset.thumbnailUrl}
+            alt={asset.title}
+            width={asset.width || 800}
+            height={asset.height || 600}
+            unoptimized={asset.type === 'gif'}
+            className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
+          />
+        )}
         <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-linear-to-t from-black/70 to-transparent p-3 pt-10 text-white">
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold capitalize">
             {asset.type === 'video' ? <Film size={14} /> : <ImageIcon size={14} />}
@@ -176,12 +250,24 @@ export function SearchWorkspace() {
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [activeSearch, setActiveSearch] = useState<{
+    query: string;
+    type: SearchAssetType;
+    page: number;
+  } | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
-  async function search(nextQuery: string) {
+  async function search(
+    nextQuery: string,
+    nextPage = 1,
+    append = false,
+    nextType: SearchAssetType = type,
+  ) {
     const normalized = nextQuery.trim();
     if (normalized.length < 2) {
       setError('请至少输入 2 个字符');
@@ -191,29 +277,76 @@ export function SearchWorkspace() {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
-    setIsLoading(true);
+    if (append) setIsLoadingMore(true);
+    else setIsLoading(true);
     setError('');
-    setResult(null);
+    if (!append) {
+      setResult(null);
+      setHasMore(false);
+    }
 
-    const nextHistory = [normalized, ...history.filter((item) => item !== normalized)].slice(0, 5);
-    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory));
-    window.dispatchEvent(new Event('clipflow-history'));
+    if (!append) {
+      const nextHistory = [normalized, ...history.filter((item) => item !== normalized)].slice(
+        0,
+        5,
+      );
+      window.localStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory));
+      window.dispatchEvent(new Event('clipflow-history'));
+    }
 
     try {
       const response = await fetch(`${API_BASE_URL}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: normalized, type, page: 1, perPage: 12 }),
+        body: JSON.stringify({
+          query: normalized,
+          type: nextType,
+          page: nextPage,
+          perPage: PAGE_SIZE,
+        }),
         signal: controller.signal,
       });
       const payload = (await response.json()) as SearchResult | { message?: string };
       if (!response.ok) throw new Error('message' in payload ? payload.message : '搜索失败');
-      setResult(payload as SearchResult);
+      const nextResult = payload as SearchResult;
+      if (append) {
+        setResult((current) => {
+          if (!current) return nextResult;
+          const seen = new Set(current.assets.map((asset) => asset.id));
+          const newAssets = nextResult.assets.filter((asset) => !seen.has(asset.id));
+          const previousStatuses = new Map(
+            current.providers.map((status) => [status.provider, status]),
+          );
+          const providers = nextResult.providers.map((status) => {
+            const previous = previousStatuses.get(status.provider);
+            return status.status === 'ok' && previous?.status === 'ok'
+              ? { ...status, count: previous.count + status.count }
+              : status;
+          });
+          const assets = [...current.assets, ...newAssets];
+          return {
+            ...nextResult,
+            assets,
+            providers,
+            total: assets.length,
+            elapsedMs: current.elapsedMs + nextResult.elapsedMs,
+          };
+        });
+      } else {
+        setResult(nextResult);
+      }
+      setActiveSearch({ query: normalized, type: nextType, page: nextPage });
+      setHasMore(
+        nextResult.providers.some((status) => status.status === 'ok' && status.count >= PAGE_SIZE),
+      );
     } catch (searchError) {
       if (searchError instanceof DOMException && searchError.name === 'AbortError') return;
       setError(searchError instanceof Error ? searchError.message : '无法连接搜索服务');
     } finally {
-      if (controllerRef.current === controller) setIsLoading(false);
+      if (controllerRef.current === controller) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
     }
   }
 
@@ -225,6 +358,11 @@ export function SearchWorkspace() {
   function choosePrompt(value: string) {
     setQuery(value);
     void search(value);
+  }
+
+  function loadMore() {
+    if (!activeSearch || isLoadingMore) return;
+    void search(activeSearch.query, activeSearch.page + 1, true, activeSearch.type);
   }
 
   const hasSearchState = isLoading || result || error;
@@ -406,11 +544,28 @@ export function SearchWorkspace() {
               )}
               {isLoading && <SkeletonResults />}
               {result?.assets.length ? (
-                <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
-                  {result.assets.map((asset) => (
-                    <AssetCard key={asset.id} asset={asset} />
-                  ))}
-                </div>
+                <>
+                  <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
+                    {result.assets.map((asset) => (
+                      <AssetCard key={asset.id} asset={asset} />
+                    ))}
+                  </div>
+                  {hasMore && (
+                    <div className="flex justify-center border-t border-[var(--line)] pt-7">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="lg"
+                        onClick={loadMore}
+                        disabled={isLoadingMore}
+                        className="min-w-36"
+                      >
+                        {isLoadingMore && <LoaderCircle className="animate-spin" size={18} />}
+                        {isLoadingMore ? '加载中…' : '加载更多'}
+                      </Button>
+                    </div>
+                  )}
+                </>
               ) : (
                 result && (
                   <div className="mx-auto max-w-xl py-14 text-center">

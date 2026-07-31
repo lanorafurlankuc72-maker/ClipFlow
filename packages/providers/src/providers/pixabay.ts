@@ -80,20 +80,21 @@ export class PixabayProvider implements SearchProvider {
     url.search = this.params(request).toString();
     const data = await fetchJson<PixabayVideoResponse>(url, { signal: request.signal });
     return data.hits.flatMap((video) => {
-      const file = video.videos.large ?? video.videos.medium ?? video.videos.small;
-      if (!file) return [];
+      const contentFile = video.videos.large ?? video.videos.medium ?? video.videos.small;
+      const previewFile = video.videos.medium ?? video.videos.small ?? contentFile;
+      if (!contentFile || !previewFile) return [];
       return [
         {
           id: `pixabay-video-${video.id}`,
           provider: this.name,
           type: 'video' as const,
           title: safeTitle(video.tags, `Pixabay 视频 ${video.id}`),
-          width: file.width,
-          height: file.height,
+          width: contentFile.width,
+          height: contentFile.height,
           duration: video.duration,
-          thumbnailUrl: file.thumbnail,
-          previewUrl: file.thumbnail,
-          contentUrl: file.url,
+          thumbnailUrl: previewFile.thumbnail,
+          previewUrl: previewFile.url,
+          contentUrl: contentFile.url,
           sourceUrl: video.pageURL,
           author: { name: video.user },
         },

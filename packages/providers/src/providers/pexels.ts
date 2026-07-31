@@ -88,9 +88,11 @@ export class PexelsProvider implements SearchProvider {
       signal: request.signal,
     });
     return data.videos.map((video) => {
-      const file = [...video.video_files]
+      const files = [...video.video_files]
         .filter((item) => item.width)
-        .sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0];
+        .sort((a, b) => (a.width ?? 0) - (b.width ?? 0));
+      const previewFile = files.find((item) => (item.width ?? 0) >= 640) ?? files[0];
+      const contentFile = files.at(-1);
       return {
         id: `pexels-video-${video.id}`,
         provider: this.name,
@@ -100,8 +102,8 @@ export class PexelsProvider implements SearchProvider {
         height: video.height,
         duration: video.duration,
         thumbnailUrl: video.image,
-        previewUrl: video.image,
-        contentUrl: file?.link ?? video.url,
+        previewUrl: previewFile?.link ?? contentFile?.link ?? video.url,
+        contentUrl: contentFile?.link ?? video.url,
         sourceUrl: video.url,
         author: { name: video.user.name, url: video.user.url },
       };
