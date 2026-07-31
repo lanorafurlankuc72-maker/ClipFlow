@@ -33,6 +33,20 @@ export interface Project extends ProjectSummary {
   assets: Asset[];
 }
 
+export interface UserAccount {
+  id: string;
+  email: string;
+  plan: 'free' | 'pro';
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  createdAt: string;
+}
+
+export interface UserCredentials extends UserAccount {
+  passwordHash: string;
+  passwordSalt: string;
+}
+
 export class ProjectNotFoundError extends Error {
   constructor() {
     super('项目不存在');
@@ -84,7 +98,88 @@ export class ClipFlowDatabase {
         PRIMARY KEY (project_id, asset_id),
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        password_salt TEXT NOT NULL,
+        plan TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'pro')),
+        stripe_customer_id TEXT,
+        stripe_subscription_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
     `);
+  }
+
+  createUser(id: string, email: string, passwordHash: string, passwordSalt: string): UserAccount {
+    this.database
+      .prepare(
+        `INSERT INTO users (id, email, password_hash, password_salt)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, email, passwordHash, passwordSalt);
+    return this.getUserById(id)!;
+  }
+
+  getUserCredentialsByEmail(email: string): UserCredentials | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, email, password_hash, password_salt, plan,
+                stripe_customer_id, stripe_subscription_id, created_at
+         FROM users WHERE email = ?`,
+      )
+      .get(email);
+    return row ? mapUserCredentials(row) : undefined;
+  }
+
+  getUserById(userId: string): UserAccount | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, email, plan, stripe_customer_id, stripe_subscription_id, created_at
+         FROM users WHERE id = ?`,
+      )
+      .get(userId);
+    return row ? mapUser(row) : undefined;
+  }
+
+  createSession(tokenHash: string, userId: string, expiresAt: string): void {
+    this.database
+      .prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+      .run(tokenHash, userId, expiresAt);
+  }
+
+  getUserBySession(tokenHash: string): UserAccount | undefined {
+    this.database.prepare('DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP').run();
+    const row = this.database
+      .prepare(
+        `SELECT users.id, users.email, users.plan, users.stripe_customer_id,
+                users.stripe_subscription_id, users.created_at
+         FROM sessions JOIN users ON users.id = sessions.user_id
+         WHERE sessions.token_hash = ? AND sessions.expires_at > CURRENT_TIMESTAMP`,
+      )
+      .get(tokenHash);
+    return row ? mapUser(row) : undefined;
+  }
+
+  deleteSession(tokenHash: string): void {
+    this.database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
+  }
+
+  upgradeUser(userId: string, customerId: string | undefined, subscriptionId: string): UserAccount {
+    this.database
+      .prepare(
+        `UPDATE users SET plan = 'pro', stripe_customer_id = COALESCE(?, stripe_customer_id),
+                stripe_subscription_id = ? WHERE id = ?`,
+      )
+      .run(customerId ?? null, subscriptionId, userId);
+    return this.getUserById(userId)!;
   }
 
   addFavorite(asset: Asset): Asset {
@@ -265,5 +360,26 @@ function mapDownload(row: Record<string, unknown> | undefined): DownloadEntry {
     title: String(row.title),
     url: String(row.url),
     createdAt: String(row.created_at),
+  };
+}
+
+function mapUser(row: Record<string, unknown>): UserAccount {
+  return {
+    id: String(row.id),
+    email: String(row.email),
+    plan: row.plan === 'pro' ? 'pro' : 'free',
+    ...(row.stripe_customer_id ? { stripeCustomerId: String(row.stripe_customer_id) } : {}),
+    ...(row.stripe_subscription_id
+      ? { stripeSubscriptionId: String(row.stripe_subscription_id) }
+      : {}),
+    createdAt: String(row.created_at),
+  };
+}
+
+function mapUserCredentials(row: Record<string, unknown>): UserCredentials {
+  return {
+    ...mapUser(row),
+    passwordHash: String(row.password_hash),
+    passwordSalt: String(row.password_salt),
   };
 }

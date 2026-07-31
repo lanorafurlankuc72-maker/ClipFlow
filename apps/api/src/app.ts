@@ -4,6 +4,25 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { analyzeSearchQuery, type SearchAnalysis } from './ai.js';
+import {
+  authenticateUser,
+  currentUser,
+  EmailAlreadyExistsError,
+  endSession,
+  InvalidCredentialsError,
+  registerUser,
+  startSession,
+} from './auth.js';
+import {
+  BillingNotConfiguredError,
+  billingConfigured,
+  createCheckoutSession,
+  InvalidWebhookSignatureError,
+  isPaidSubscription,
+  parseStripeWebhook,
+  retrieveCheckoutSession,
+  StripeApiError,
+} from './billing.js';
 import { ClipFlowDatabase, ProjectNotFoundError } from './database.js';
 
 const searchSchema = z.object({
@@ -34,6 +53,16 @@ const projectSchema = z.object({
   description: z.string().trim().max(300).default(''),
 });
 
+const credentialsSchema = z.object({
+  email: z
+    .email('请输入有效邮箱')
+    .max(200)
+    .transform((value) => value.toLowerCase()),
+  password: z.string().min(8, '密码至少需要 8 位').max(128),
+});
+
+const checkoutSessionSchema = z.string().startsWith('cs_').max(300);
+
 interface CreateAppOptions {
   databasePath?: string;
 }
@@ -45,7 +74,33 @@ export function createApp(options: CreateAppOptions = {}) {
   const analysisCache = new Map<string, SearchAnalysis>();
 
   app.disable('x-powered-by');
-  app.use(cors({ origin: webOrigin, methods: ['GET', 'POST', 'DELETE'] }));
+  app.use(cors({ origin: webOrigin, methods: ['GET', 'POST', 'DELETE'], credentials: true }));
+
+  app.post(
+    '/billing/webhook',
+    express.raw({ type: 'application/json', limit: '128kb' }),
+    (request, response, next) => {
+      try {
+        const event = parseStripeWebhook(
+          request.body as Buffer,
+          request.headers['stripe-signature'] as string | undefined,
+        );
+        if (event.type === 'checkout.session.completed' && isPaidSubscription(event.data.object)) {
+          const session = event.data.object;
+          if (session.client_reference_id && session.subscription) {
+            database.upgradeUser(
+              session.client_reference_id,
+              session.customer ?? undefined,
+              session.subscription,
+            );
+          }
+        }
+        response.json({ received: true });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
   app.use(express.json({ limit: '32kb' }));
 
   app.get('/health', (_request, response) => {
@@ -64,6 +119,83 @@ export function createApp(options: CreateAppOptions = {}) {
         };
       }),
     });
+  });
+
+  app.post('/auth/register', (request, response, next) => {
+    try {
+      const input = credentialsSchema.parse(request.body);
+      const user = registerUser(database, input.email, input.password);
+      startSession(database, response, user.id);
+      response.status(201).json({ user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/auth/login', (request, response, next) => {
+    try {
+      const input = credentialsSchema.parse(request.body);
+      const user = authenticateUser(database, input.email, input.password);
+      startSession(database, response, user.id);
+      response.json({ user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/auth/logout', (request, response) => {
+    endSession(database, request, response);
+    response.json({ success: true });
+  });
+
+  app.get('/auth/me', (request, response) => {
+    response.json({ user: currentUser(database, request) ?? null });
+  });
+
+  app.get('/billing/status', (request, response) => {
+    response.json({
+      configured: billingConfigured(),
+      user: currentUser(database, request) ?? null,
+    });
+  });
+
+  app.post('/billing/checkout', async (request, response, next) => {
+    try {
+      const user = currentUser(database, request);
+      if (!user) {
+        response.status(401).json({ error: 'unauthorized', message: '请先登录' });
+        return;
+      }
+      const session = await createCheckoutSession(user);
+      if (!session.url) throw new StripeApiError('Stripe 未返回付款地址');
+      response.json({ url: session.url });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/billing/verify', async (request, response, next) => {
+    try {
+      const user = currentUser(database, request);
+      if (!user) {
+        response.status(401).json({ error: 'unauthorized', message: '请先登录' });
+        return;
+      }
+      const sessionId = checkoutSessionSchema.parse(request.query.session_id);
+      const session = await retrieveCheckoutSession(sessionId);
+      if (session.client_reference_id !== user.id || !isPaidSubscription(session)) {
+        response.status(400).json({ error: 'payment_unverified', message: '暂未确认付款' });
+        return;
+      }
+      const updatedUser = database.upgradeUser(
+        user.id,
+        session.customer ?? undefined,
+        session.subscription!,
+      );
+      response.json({ user: updatedUser });
+    } catch (error) {
+      next(error);
+    }
   });
 
   const searchHandler = async (request: Request, response: Response, next: NextFunction) => {
@@ -187,6 +319,26 @@ export function createApp(options: CreateAppOptions = {}) {
     }
     if (error instanceof ProjectNotFoundError) {
       response.status(404).json({ error: 'project_not_found', message: error.message });
+      return;
+    }
+    if (error instanceof EmailAlreadyExistsError) {
+      response.status(409).json({ error: 'email_exists', message: '该邮箱已注册' });
+      return;
+    }
+    if (error instanceof InvalidCredentialsError) {
+      response.status(401).json({ error: 'invalid_credentials', message: '邮箱或密码错误' });
+      return;
+    }
+    if (error instanceof BillingNotConfiguredError) {
+      response.status(503).json({ error: 'billing_not_configured', message: '支付功能尚未配置' });
+      return;
+    }
+    if (error instanceof InvalidWebhookSignatureError) {
+      response.status(400).json({ error: 'invalid_signature', message: '支付回调签名无效' });
+      return;
+    }
+    if (error instanceof StripeApiError) {
+      response.status(502).json({ error: 'stripe_error', message: error.message });
       return;
     }
     console.error(error);

@@ -15,15 +15,16 @@ import {
   Play,
   Plus,
   Search,
-  Settings2,
   Sparkles,
   Trash2,
+  UserRound,
   X,
 } from 'lucide-react';
 import Image from 'next/image';
 import { FormEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { AccountDialog, type AccountUser } from '@/components/account-dialog';
 import { cn } from '@/lib/utils';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
@@ -527,9 +528,50 @@ export function SearchWorkspace() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projectAsset, setProjectAsset] = useState<Asset | null>(null);
   const [notice, setNotice] = useState('');
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountUser, setAccountUser] = useState<AccountUser | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch(`${API_BASE_URL}/auth/me`, { credentials: 'include' })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
+      .then((payload: { user: AccountUser | null }) => {
+        if (active) setAccountUser(payload.user);
+      })
+      .catch(() => undefined);
+
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    if (params.get('checkout') === 'success' && sessionId) {
+      void fetch(`${API_BASE_URL}/billing/verify?session_id=${encodeURIComponent(sessionId)}`, {
+        credentials: 'include',
+      })
+        .then(async (response) => {
+          const payload = (await response.json()) as { user?: AccountUser; message?: string };
+          if (!response.ok || !payload.user) throw new Error(payload.message ?? '付款验证失败');
+          if (active) {
+            setAccountUser(payload.user);
+            setNotice('商业版已开通');
+          }
+        })
+        .catch((checkoutError) => {
+          if (active)
+            setNotice(checkoutError instanceof Error ? checkoutError.message : '付款验证失败');
+        })
+        .finally(() => window.history.replaceState({}, '', window.location.pathname));
+    } else if (params.get('checkout') === 'cancelled') {
+      queueMicrotask(() => {
+        if (active) setNotice('已取消付款');
+      });
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -860,8 +902,9 @@ export function SearchWorkspace() {
               <Heart size={16} fill={showFavorites ? 'currentColor' : 'none'} />
               收藏 {favorites.length}
             </Button>
-            <Button variant="ghost" size="icon" aria-label="设置">
-              <Settings2 size={18} />
+            <Button variant="ghost" onClick={() => setAccountOpen(true)}>
+              <UserRound size={17} />
+              {accountUser ? (accountUser.plan === 'pro' ? '商业版' : '账号') : '登录'}
             </Button>
             <Button
               variant="secondary"
@@ -945,6 +988,16 @@ export function SearchWorkspace() {
               <a className="nav-link" href="#history">
                 历史
               </a>
+              <button
+                type="button"
+                className="nav-link text-left"
+                onClick={() => {
+                  setAccountOpen(true);
+                  setMobileMenuOpen(false);
+                }}
+              >
+                {accountUser ? '我的账号' : '登录 / 注册'}
+              </button>
             </div>
           </nav>
         </div>
@@ -952,6 +1005,14 @@ export function SearchWorkspace() {
 
       {selectedPreview && (
         <VideoPreviewDialog asset={selectedPreview} onClose={() => setSelectedPreview(null)} />
+      )}
+
+      {accountOpen && (
+        <AccountDialog
+          user={accountUser}
+          onUserChange={setAccountUser}
+          onClose={() => setAccountOpen(false)}
+        />
       )}
 
       {projectAsset && (

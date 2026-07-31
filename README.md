@@ -47,3 +47,10 @@ pnpm build
 - 支持创建、删除项目，以及将搜索素材加入项目或移出项目
 - PWA 清单和离线应用外壳已启用，生产构建可安装到手机桌面
 - 项目数据与素材归档继续保存在 `data/clipflow.db`
+
+## Sprint 4
+
+- 支持邮箱注册、登录、退出与 30 天安全会话；密码使用 scrypt 加盐保存
+- 账号默认使用免费版，登录与搜索等基础功能不依赖支付配置
+- 可选 Stripe Checkout 商业版订阅；在 `.env` 填写 `STRIPE_SECRET_KEY`、`STRIPE_PRICE_ID` 和 `STRIPE_WEBHOOK_SECRET` 后启用
+- Stripe 回调地址为 `POST /billing/webhook`，本地联调时需由 Stripe CLI 转发到 `http://localhost:4000/billing/webhook`

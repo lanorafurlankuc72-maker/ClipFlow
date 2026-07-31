@@ -1,5 +1,6 @@
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { createHmac } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app.js';
 
 const testAsset = {
@@ -22,6 +23,10 @@ function createTestApp() {
 }
 
 describe('ClipFlow API', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('returns service health', async () => {
     const response = await request(createTestApp()).get('/health');
     expect(response.status).toBe(200);
@@ -109,5 +114,87 @@ describe('ClipFlow API', () => {
     const response = await request(createTestApp()).get('/project/missing');
     expect(response.status).toBe(404);
     expect(response.body.error).toBe('project_not_found');
+  });
+
+  it('registers, restores and logs out an account session', async () => {
+    const agent = request.agent(createTestApp());
+    const registered = await agent
+      .post('/auth/register')
+      .send({ email: 'Editor@clipflow.test', password: 'secure-pass-123' });
+    expect(registered.status).toBe(201);
+    expect(registered.body.user).toMatchObject({
+      email: 'editor@clipflow.test',
+      plan: 'free',
+    });
+    expect(registered.headers['set-cookie']?.[0]).toContain('HttpOnly');
+
+    const current = await agent.get('/auth/me');
+    expect(current.body.user.email).toBe('editor@clipflow.test');
+
+    expect((await agent.post('/auth/logout')).status).toBe(200);
+    expect((await agent.get('/auth/me')).body.user).toBeNull();
+  });
+
+  it('rejects duplicate accounts and invalid passwords', async () => {
+    const app = createTestApp();
+    const credentials = { email: 'hello@clipflow.test', password: 'secure-pass-123' };
+    await request(app).post('/auth/register').send(credentials);
+    expect((await request(app).post('/auth/register').send(credentials)).status).toBe(409);
+    expect(
+      (
+        await request(app)
+          .post('/auth/login')
+          .send({ ...credentials, password: 'wrong-password' })
+      ).status,
+    ).toBe(401);
+  });
+
+  it('keeps billing optional and requires an authenticated account', async () => {
+    vi.stubEnv('STRIPE_SECRET_KEY', '');
+    vi.stubEnv('STRIPE_PRICE_ID', '');
+    const app = createTestApp();
+    expect((await request(app).get('/billing/status')).body.configured).toBe(false);
+    expect((await request(app).post('/billing/checkout')).status).toBe(401);
+
+    const agent = request.agent(app);
+    await agent
+      .post('/auth/register')
+      .send({ email: 'pay@clipflow.test', password: 'secure-pass-123' });
+    const checkout = await agent.post('/billing/checkout');
+    expect(checkout.status).toBe(503);
+    expect(checkout.body.error).toBe('billing_not_configured');
+  });
+
+  it('verifies Stripe webhook signatures before upgrading an account', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test_secret');
+    const app = createTestApp();
+    const agent = request.agent(app);
+    const registered = await agent
+      .post('/auth/register')
+      .send({ email: 'pro@clipflow.test', password: 'secure-pass-123' });
+    const body = JSON.stringify({
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_test_complete',
+          status: 'complete',
+          payment_status: 'paid',
+          client_reference_id: registered.body.user.id,
+          customer: 'cus_test',
+          subscription: 'sub_test',
+        },
+      },
+    });
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const signature = createHmac('sha256', 'whsec_test_secret')
+      .update(`${timestamp}.${body}`)
+      .digest('hex');
+    const webhook = await request(app)
+      .post('/billing/webhook')
+      .set('Content-Type', 'application/json')
+      .set('Stripe-Signature', `t=${timestamp},v1=${signature}`)
+      .send(body);
+    expect(webhook.status).toBe(200);
+    expect((await agent.get('/auth/me')).body.user.plan).toBe('pro');
   });
 });
