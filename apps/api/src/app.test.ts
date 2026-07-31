@@ -77,4 +77,37 @@ describe('ClipFlow API', () => {
       searchQuery: 'city aerial',
     });
   });
+
+  it('creates projects and manages project assets', async () => {
+    const app = createTestApp();
+    const created = await request(app)
+      .post('/project')
+      .send({ name: '品牌短片', description: '发布会剪辑素材' });
+    expect(created.status).toBe(201);
+    const projectId = String(created.body.project.id);
+
+    const withAsset = await request(app).post(`/project/${projectId}/assets`).send(testAsset);
+    expect(withAsset.status).toBe(201);
+    expect(withAsset.body.project.assetCount).toBe(1);
+    expect(withAsset.body.project.assets).toEqual([testAsset]);
+
+    const projects = await request(app).get('/project');
+    expect(projects.body.projects[0]).toMatchObject({
+      id: projectId,
+      name: '品牌短片',
+      assetCount: 1,
+    });
+
+    const withoutAsset = await request(app).delete(`/project/${projectId}/assets/${testAsset.id}`);
+    expect(withoutAsset.body.project.assetCount).toBe(0);
+
+    const removed = await request(app).delete(`/project/${projectId}`);
+    expect(removed.body.removed).toBe(true);
+  });
+
+  it('returns 404 for a missing project', async () => {
+    const response = await request(createTestApp()).get('/project/missing');
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('project_not_found');
+  });
 });

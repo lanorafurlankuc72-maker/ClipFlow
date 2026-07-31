@@ -41,3 +41,9 @@ pnpm build
 - 可选 AI 搜索增强支持 OpenAI 或 DeepSeek；在 `.env` 中设置 `AI_PROVIDER` 和对应 Key
 - AI 未配置或请求失败时会自动回退到原始关键词，不影响基础搜索
 - 运行环境要求 Node.js 22.5 或更高版本
+
+## Sprint 3
+
+- 支持创建、删除项目，以及将搜索素材加入项目或移出项目
+- PWA 清单和离线应用外壳已启用，生产构建可安装到手机桌面
+- 项目数据与素材归档继续保存在 `data/clipflow.db`

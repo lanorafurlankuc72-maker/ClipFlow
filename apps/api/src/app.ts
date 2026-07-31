@@ -1,9 +1,10 @@
 import { aggregateSearch, createProviderRegistry, providerNames } from '@clipflow/providers';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { analyzeSearchQuery, type SearchAnalysis } from './ai.js';
-import { ClipFlowDatabase } from './database.js';
+import { ClipFlowDatabase, ProjectNotFoundError } from './database.js';
 
 const searchSchema = z.object({
   query: z.string().trim().min(2, '搜索内容至少需要 2 个字符').max(200),
@@ -26,6 +27,11 @@ const assetSchema = z.object({
   author: z.object({ name: z.string().max(300), url: z.url().optional() }),
   duration: z.number().nonnegative().optional(),
   score: z.number().optional(),
+});
+
+const projectSchema = z.object({
+  name: z.string().trim().min(1, '项目名称不能为空').max(80),
+  description: z.string().trim().max(300).default(''),
 });
 
 interface CreateAppOptions {
@@ -117,6 +123,54 @@ export function createApp(options: CreateAppOptions = {}) {
     response.json({ history: database.listSearchHistory() });
   });
 
+  app.get('/project', (_request, response) => {
+    response.json({ projects: database.listProjects() });
+  });
+
+  app.post('/project', (request, response, next) => {
+    try {
+      const input = projectSchema.parse(request.body);
+      const project = database.createProject(randomUUID(), input.name, input.description);
+      response.status(201).json({ project });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/project/:projectId', (request, response, next) => {
+    try {
+      response.json({ project: database.getProject(String(request.params.projectId)) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/project/:projectId', (request, response) => {
+    response.json({ removed: database.deleteProject(String(request.params.projectId)) });
+  });
+
+  app.post('/project/:projectId/assets', (request, response, next) => {
+    try {
+      const asset = assetSchema.parse(request.body);
+      const project = database.addProjectAsset(String(request.params.projectId), asset);
+      response.status(201).json({ project });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/project/:projectId/assets/:assetId', (request, response, next) => {
+    try {
+      const project = database.removeProjectAsset(
+        String(request.params.projectId),
+        String(request.params.assetId),
+      );
+      response.json({ project });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.use((_request, response) => {
     response.status(404).json({ error: 'not_found', message: '接口不存在' });
   });
@@ -129,6 +183,10 @@ export function createApp(options: CreateAppOptions = {}) {
         message: error.issues[0]?.message ?? '请求参数不正确',
         issues: error.issues,
       });
+      return;
+    }
+    if (error instanceof ProjectNotFoundError) {
+      response.status(404).json({ error: 'project_not_found', message: error.message });
       return;
     }
     console.error(error);

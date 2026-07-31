@@ -20,6 +20,26 @@ export interface DownloadEntry {
   createdAt: string;
 }
 
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  description: string;
+  assetCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Project extends ProjectSummary {
+  assets: Asset[];
+}
+
+export class ProjectNotFoundError extends Error {
+  constructor() {
+    super('项目不存在');
+    this.name = 'ProjectNotFoundError';
+  }
+}
+
 const defaultDatabasePath = fileURLToPath(new URL('../../../data/clipflow.db', import.meta.url));
 
 export class ClipFlowDatabase {
@@ -48,6 +68,21 @@ export class ClipFlowDatabase {
         query TEXT NOT NULL,
         search_query TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS project_assets (
+        project_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL,
+        asset_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (project_id, asset_id),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
     `);
   }
@@ -124,6 +159,101 @@ export class ClipFlowDatabase {
         createdAt: String(row.created_at),
       }));
   }
+
+  createProject(id: string, name: string, description: string): Project {
+    this.database
+      .prepare('INSERT INTO projects (id, name, description) VALUES (?, ?, ?)')
+      .run(id, name, description);
+    return this.getProject(id);
+  }
+
+  listProjects(): ProjectSummary[] {
+    return this.database
+      .prepare(
+        `SELECT projects.id, projects.name, projects.description,
+                projects.created_at, projects.updated_at,
+                COUNT(project_assets.asset_id) AS asset_count
+         FROM projects
+         LEFT JOIN project_assets ON project_assets.project_id = projects.id
+         GROUP BY projects.id
+         ORDER BY projects.updated_at DESC, projects.created_at DESC`,
+      )
+      .all()
+      .map(mapProjectSummary);
+  }
+
+  getProject(projectId: string): Project {
+    const row = this.database
+      .prepare(
+        `SELECT projects.id, projects.name, projects.description,
+                projects.created_at, projects.updated_at,
+                COUNT(project_assets.asset_id) AS asset_count
+         FROM projects
+         LEFT JOIN project_assets ON project_assets.project_id = projects.id
+         WHERE projects.id = ?
+         GROUP BY projects.id`,
+      )
+      .get(projectId);
+    if (!row) throw new ProjectNotFoundError();
+    const assets = this.database
+      .prepare(
+        `SELECT asset_json FROM project_assets
+         WHERE project_id = ? ORDER BY created_at DESC`,
+      )
+      .all(projectId)
+      .flatMap(parseAssetRow);
+    return { ...mapProjectSummary(row), assets };
+  }
+
+  deleteProject(projectId: string): boolean {
+    return this.database.prepare('DELETE FROM projects WHERE id = ?').run(projectId).changes > 0;
+  }
+
+  addProjectAsset(projectId: string, asset: Asset): Project {
+    this.touchProject(projectId);
+    this.database
+      .prepare(
+        `INSERT INTO project_assets (project_id, asset_id, asset_json)
+         VALUES (?, ?, ?)
+         ON CONFLICT(project_id, asset_id) DO UPDATE SET asset_json = excluded.asset_json`,
+      )
+      .run(projectId, asset.id, JSON.stringify(asset));
+    return this.getProject(projectId);
+  }
+
+  removeProjectAsset(projectId: string, assetId: string): Project {
+    this.database
+      .prepare('DELETE FROM project_assets WHERE project_id = ? AND asset_id = ?')
+      .run(projectId, assetId);
+    this.touchProject(projectId);
+    return this.getProject(projectId);
+  }
+
+  private touchProject(projectId: string): void {
+    const result = this.database
+      .prepare('UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(projectId);
+    if (result.changes === 0) throw new ProjectNotFoundError();
+  }
+}
+
+function parseAssetRow(row: Record<string, unknown>): Asset[] {
+  try {
+    return [JSON.parse(String(row.asset_json)) as Asset];
+  } catch {
+    return [];
+  }
+}
+
+function mapProjectSummary(row: Record<string, unknown>): ProjectSummary {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    description: String(row.description),
+    assetCount: Number(row.asset_count),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
 }
 
 function mapDownload(row: Record<string, unknown> | undefined): DownloadEntry {
