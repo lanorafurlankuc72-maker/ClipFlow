@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.5.0"
   },
   "scripts": {
     "dev": "pnpm --filter @clipflow/providers build && concurrently -n web,api -c blue,green \"pnpm --filter @clipflow/web dev\" \"pnpm --filter @clipflow/api dev\"",

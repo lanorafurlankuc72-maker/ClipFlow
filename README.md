@@ -34,3 +34,10 @@ pnpm build
 ## Provider 扩展
 
 实现 `SearchProvider` 接口并在 `packages/providers/src/registry.ts` 注册即可。聚合器不依赖具体 Provider 实现。
+
+## Sprint 2
+
+- 收藏、下载记录和搜索历史保存在 `data/clipflow.db`
+- 可选 AI 搜索增强支持 OpenAI 或 DeepSeek；在 `.env` 中设置 `AI_PROVIDER` 和对应 Key
+- AI 未配置或请求失败时会自动回退到原始关键词，不影响基础搜索
+- 运行环境要求 Node.js 22.5 或更高版本

@@ -46,6 +46,12 @@ export interface SearchResult {
   providers: ProviderStatus[];
   total: number;
   elapsedMs: number;
+  analysis?: {
+    usedAi: boolean;
+    provider: 'openai' | 'deepseek' | null;
+    searchQuery: string;
+    keywords: string[];
+  };
 }
 
 export interface SearchProvider {

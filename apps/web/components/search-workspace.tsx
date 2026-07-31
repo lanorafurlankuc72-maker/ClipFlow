@@ -148,7 +148,19 @@ function VideoPreviewDialog({ asset, onClose }: { asset: Asset; onClose: () => v
   );
 }
 
-function AssetCard({ asset, onPreview }: { asset: Asset; onPreview: (asset: Asset) => void }) {
+function AssetCard({
+  asset,
+  isFavorite,
+  onPreview,
+  onToggleFavorite,
+  onDownload,
+}: {
+  asset: Asset;
+  isFavorite: boolean;
+  onPreview: (asset: Asset) => void;
+  onToggleFavorite: (asset: Asset) => void;
+  onDownload: (asset: Asset) => void;
+}) {
   return (
     <article className="group mb-4 break-inside-avoid overflow-hidden rounded-xl bg-white">
       <div className="relative overflow-hidden bg-[var(--surface)]">
@@ -182,16 +194,19 @@ function AssetCard({ asset, onPreview }: { asset: Asset; onPreview: (asset: Asse
             <Button
               size="icon"
               variant="secondary"
-              aria-label={`收藏 ${asset.title}`}
-              className="size-9 bg-white/95"
+              aria-label={isFavorite ? `取消收藏 ${asset.title}` : `收藏 ${asset.title}`}
+              aria-pressed={isFavorite}
+              onClick={() => onToggleFavorite(asset)}
+              className={cn('size-9 bg-white/95', isFavorite && 'text-[var(--primary-ink)]')}
             >
-              <Heart size={16} />
+              <Heart size={16} fill={isFavorite ? 'currentColor' : 'none'} />
             </Button>
             <Button size="icon" variant="secondary" asChild className="size-9 bg-white/95">
               <a
                 href={asset.contentUrl}
                 target="_blank"
                 rel="noreferrer"
+                onClick={() => onDownload(asset)}
                 aria-label={`打开下载地址：${asset.title}`}
               >
                 <Download size={16} />
@@ -255,9 +270,31 @@ export function SearchWorkspace() {
   } | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedPreview, setSelectedPreview] = useState<Asset | null>(null);
+  const [favorites, setFavorites] = useState<Asset[]>([]);
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [notice, setNotice] = useState('');
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch(`${API_BASE_URL}/favorites`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
+      .then((payload: { assets: Asset[] }) => {
+        if (active) setFavorites(payload.assets);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(''), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
 
   async function search(
     nextQuery: string,
@@ -280,6 +317,7 @@ export function SearchWorkspace() {
     if (!append) {
       setResult(null);
       setHasMore(false);
+      setShowFavorites(false);
     }
 
     if (!append) {
@@ -362,7 +400,45 @@ export function SearchWorkspace() {
     void search(activeSearch.query, activeSearch.page + 1, true, activeSearch.type);
   }
 
-  const hasSearchState = isLoading || result || error;
+  async function toggleFavorite(asset: Asset) {
+    const wasFavorite = favorites.some((favorite) => favorite.id === asset.id);
+    setFavorites((current) =>
+      wasFavorite ? current.filter((favorite) => favorite.id !== asset.id) : [asset, ...current],
+    );
+    setNotice(wasFavorite ? '已取消收藏' : '已加入收藏');
+
+    try {
+      const response = await fetch(
+        wasFavorite
+          ? `${API_BASE_URL}/favorite/${encodeURIComponent(asset.id)}`
+          : `${API_BASE_URL}/favorite`,
+        {
+          method: wasFavorite ? 'DELETE' : 'POST',
+          headers: wasFavorite ? undefined : { 'Content-Type': 'application/json' },
+          body: wasFavorite ? undefined : JSON.stringify(asset),
+        },
+      );
+      if (!response.ok) throw new Error('收藏保存失败');
+    } catch {
+      setFavorites((current) =>
+        wasFavorite ? [asset, ...current] : current.filter((favorite) => favorite.id !== asset.id),
+      );
+      setNotice('收藏保存失败，请重试');
+    }
+  }
+
+  function recordDownload(asset: Asset) {
+    void fetch(`${API_BASE_URL}/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(asset),
+    });
+    setNotice('已打开素材并记录下载');
+  }
+
+  const favoriteIds = new Set(favorites.map((asset) => asset.id));
+  const displayAssets = showFavorites ? favorites : (result?.assets ?? []);
+  const hasSearchState = showFavorites || isLoading || result || error;
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
@@ -378,9 +454,20 @@ export function SearchWorkspace() {
             <span>ClipFlow</span>
           </a>
           <nav className="hidden items-center gap-1 md:flex" aria-label="主要导航">
-            <a className="nav-link nav-link-active" href="#search">
+            <a
+              className={cn('nav-link', !showFavorites && 'nav-link-active')}
+              href="#search"
+              onClick={() => setShowFavorites(false)}
+            >
               搜索
             </a>
+            <button
+              type="button"
+              className={cn('nav-link', showFavorites && 'nav-link-active')}
+              onClick={() => setShowFavorites(true)}
+            >
+              收藏
+            </button>
             <a className="nav-link" href="#projects">
               项目
             </a>
@@ -389,6 +476,10 @@ export function SearchWorkspace() {
             </a>
           </nav>
           <div className="hidden items-center gap-2 md:flex">
+            <Button variant="secondary" onClick={() => setShowFavorites((current) => !current)}>
+              <Heart size={16} fill={showFavorites ? 'currentColor' : 'none'} />
+              收藏 {favorites.length}
+            </Button>
             <Button variant="ghost" size="icon" aria-label="设置">
               <Settings2 size={18} />
             </Button>
@@ -429,9 +520,26 @@ export function SearchWorkspace() {
               </Button>
             </div>
             <div className="flex flex-col gap-2">
-              <a className="nav-link nav-link-active" href="#search">
+              <a
+                className={cn('nav-link', !showFavorites && 'nav-link-active')}
+                href="#search"
+                onClick={() => {
+                  setShowFavorites(false);
+                  setMobileMenuOpen(false);
+                }}
+              >
                 搜索
               </a>
+              <button
+                type="button"
+                className={cn('nav-link text-left', showFavorites && 'nav-link-active')}
+                onClick={() => {
+                  setShowFavorites(true);
+                  setMobileMenuOpen(false);
+                }}
+              >
+                收藏 {favorites.length}
+              </button>
               <a className="nav-link" href="#projects">
                 项目
               </a>
@@ -445,6 +553,15 @@ export function SearchWorkspace() {
 
       {selectedPreview && (
         <VideoPreviewDialog asset={selectedPreview} onClose={() => setSelectedPreview(null)} />
+      )}
+
+      {notice && (
+        <div
+          className="fixed bottom-5 right-5 z-60 rounded-lg bg-[var(--ink)] px-4 py-3 text-sm font-medium text-white shadow-lg"
+          role="status"
+        >
+          {notice}
+        </div>
       )}
 
       <main id="top">
@@ -515,17 +632,39 @@ export function SearchWorkspace() {
             <section aria-live="polite">
               <div className="mb-6 flex flex-col gap-4 border-b border-[var(--line)] pb-5 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <p className="text-sm text-[var(--muted)]">搜索结果</p>
+                  <p className="text-sm text-[var(--muted)]">
+                    {showFavorites ? '素材库' : '搜索结果'}
+                  </p>
                   <h2 className="mt-1 text-2xl font-bold tracking-[-0.025em]">
-                    {result ? `“${result.query}”` : isLoading ? '正在聚合素材…' : '搜索未完成'}
+                    {showFavorites
+                      ? '我的收藏'
+                      : result
+                        ? `“${result.query}”`
+                        : isLoading
+                          ? '正在聚合素材…'
+                          : '搜索未完成'}
                   </h2>
-                  {result && (
+                  {showFavorites ? (
+                    <p className="mt-1 text-sm text-[var(--muted)]">共 {favorites.length} 条素材</p>
+                  ) : result ? (
                     <p className="mt-1 text-sm text-[var(--muted)]">
                       去重后 {result.total} 条 · {result.elapsedMs} ms
                     </p>
+                  ) : null}
+                  {!showFavorites && result?.analysis?.usedAi && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--primary-ink)]">
+                        <Sparkles size={14} /> AI 已拆解
+                      </span>
+                      {result.analysis.keywords.map((keyword) => (
+                        <span key={keyword} className="provider-chip">
+                          {keyword}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
-                {result && (
+                {!showFavorites && result && (
                   <div className="flex flex-wrap gap-2">
                     {result.providers.map((status) => (
                       <ProviderBadge key={status.provider} status={status} />
@@ -534,7 +673,7 @@ export function SearchWorkspace() {
                 )}
               </div>
 
-              {error && (
+              {!showFavorites && error && (
                 <div
                   className="rounded-xl bg-[var(--error-soft)] p-5 text-[var(--error)]"
                   role="alert"
@@ -543,15 +682,22 @@ export function SearchWorkspace() {
                   <p className="mt-1 text-sm">{error}。请确认 API 服务正在运行后重试。</p>
                 </div>
               )}
-              {isLoading && <SkeletonResults />}
-              {result?.assets.length ? (
+              {!showFavorites && isLoading && <SkeletonResults />}
+              {displayAssets.length ? (
                 <>
                   <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
-                    {result.assets.map((asset) => (
-                      <AssetCard key={asset.id} asset={asset} onPreview={setSelectedPreview} />
+                    {displayAssets.map((asset) => (
+                      <AssetCard
+                        key={asset.id}
+                        asset={asset}
+                        isFavorite={favoriteIds.has(asset.id)}
+                        onPreview={setSelectedPreview}
+                        onToggleFavorite={(item) => void toggleFavorite(item)}
+                        onDownload={recordDownload}
+                      />
                     ))}
                   </div>
-                  {hasMore && (
+                  {!showFavorites && hasMore && (
                     <div className="flex justify-center border-t border-[var(--line)] pt-7">
                       <Button
                         type="button"
@@ -568,15 +714,18 @@ export function SearchWorkspace() {
                   )}
                 </>
               ) : (
-                result && (
+                (result || showFavorites) && (
                   <div className="mx-auto max-w-xl py-14 text-center">
                     <div className="mx-auto grid size-12 place-items-center rounded-xl bg-[var(--surface-strong)] text-[var(--muted)]">
                       <Search size={22} />
                     </div>
-                    <h3 className="mt-4 text-lg font-semibold">还没有可展示的素材</h3>
+                    <h3 className="mt-4 text-lg font-semibold">
+                      {showFavorites ? '还没有收藏素材' : '还没有可展示的素材'}
+                    </h3>
                     <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
-                      请在根目录的 .env 中配置至少一个 Provider API
-                      Key，然后重新启动服务。已配置的平台会自动加入下一次聚合搜索。
+                      {showFavorites
+                        ? '在搜索结果中点击心形按钮，素材会保存在这里。'
+                        : '请在根目录的 .env 中配置至少一个 Provider API Key，然后重新启动服务。已配置的平台会自动加入下一次聚合搜索。'}
                     </p>
                   </div>
                 )
