@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   Clock3,
   Download,
+  FileDown,
   Film,
   FolderOpen,
   FolderPlus,
@@ -12,6 +13,7 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   Menu,
+  Pencil,
   Play,
   Plus,
   Search,
@@ -30,6 +32,10 @@ import { cn } from '@/lib/utils';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const HISTORY_KEY = 'clipflow-search-history';
 const PAGE_SIZE = 24;
+
+function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  return fetch(input, { ...init, credentials: 'include' });
+}
 
 interface ProjectSummary {
   id: string;
@@ -230,9 +236,14 @@ function ProjectsWorkspace({
   projects,
   selectedProject,
   favoriteIds,
+  favoriteAssets,
   onCreate,
   onSelect,
   onDelete,
+  onUpdate,
+  onExport,
+  onAddFavorites,
+  onClearAssets,
   onRemoveAsset,
   onPreview,
   onToggleFavorite,
@@ -241,9 +252,14 @@ function ProjectsWorkspace({
   projects: ProjectSummary[];
   selectedProject: Project | null;
   favoriteIds: Set<string>;
+  favoriteAssets: Asset[];
   onCreate: (name: string) => Promise<void>;
   onSelect: (projectId: string) => void;
   onDelete: (project: ProjectSummary) => void;
+  onUpdate: (projectId: string, name: string, description: string) => Promise<void>;
+  onExport: (project: Project) => void;
+  onAddFavorites: (projectId: string, assets: Asset[]) => void;
+  onClearAssets: (projectId: string) => void;
   onRemoveAsset: (projectId: string, asset: Asset) => void;
   onPreview: (asset: Asset) => void;
   onToggleFavorite: (asset: Asset) => void;
@@ -251,6 +267,9 @@ function ProjectsWorkspace({
 }) {
   const [name, setName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -330,13 +349,88 @@ function ProjectsWorkspace({
         <div>
           {selectedProject ? (
             <>
-              <div className="mb-5 flex items-end justify-between border-b border-[var(--line)] pb-4">
-                <div>
-                  <h2 className="text-xl font-bold">{selectedProject.name}</h2>
-                  <p className="mt-1 text-sm text-[var(--muted)]">
-                    {selectedProject.assetCount} 条素材
-                  </p>
-                </div>
+              <div className="mb-5 border-b border-[var(--line)] pb-4">
+                {editing ? (
+                  <form
+                    className="flex flex-col gap-3"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void onUpdate(selectedProject.id, editName, editDescription).then(() =>
+                        setEditing(false),
+                      );
+                    }}
+                  >
+                    <Input
+                      value={editName}
+                      onChange={(event) => setEditName(event.target.value)}
+                      maxLength={80}
+                      aria-label="项目名称"
+                      required
+                    />
+                    <Input
+                      value={editDescription}
+                      onChange={(event) => setEditDescription(event.target.value)}
+                      maxLength={300}
+                      aria-label="项目备注"
+                      placeholder="项目备注（可选）"
+                    />
+                    <div className="flex gap-2">
+                      <Button type="submit">保存修改</Button>
+                      <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
+                        取消
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold">{selectedProject.name}</h2>
+                      <p className="mt-1 text-sm text-[var(--muted)]">
+                        {selectedProject.description || '暂无备注'} · {selectedProject.assetCount}{' '}
+                        条素材
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => {
+                          setEditName(selectedProject.name);
+                          setEditDescription(selectedProject.description);
+                          setEditing(true);
+                        }}
+                      >
+                        <Pencil size={16} /> 编辑
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => onExport(selectedProject)}
+                      >
+                        <FileDown size={16} /> 导出
+                      </Button>
+                      {favoriteAssets.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => onAddFavorites(selectedProject.id, favoriteAssets)}
+                        >
+                          收藏全部加入
+                        </Button>
+                      )}
+                      {selectedProject.assetCount > 0 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-[var(--error)]"
+                          onClick={() => onClearAssets(selectedProject.id)}
+                        >
+                          清空素材
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               {selectedProject.assets.length ? (
                 <div className="columns-1 gap-4 sm:columns-2 xl:columns-3">
@@ -508,7 +602,8 @@ export function SearchWorkspace() {
   const [query, setQuery] = useState('');
   const [type, setType] = useState<SearchAssetType>('all');
   const historyJson = useSyncExternalStore(subscribeHistory, getHistorySnapshot, () => '[]');
-  const history = parseHistory(historyJson);
+  const localHistory = parseHistory(historyJson);
+  const [accountHistory, setAccountHistory] = useState<string[]>([]);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -531,12 +626,16 @@ export function SearchWorkspace() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountUser, setAccountUser] = useState<AccountUser | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const history = accountUser ? accountHistory : localHistory;
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   useEffect(() => {
     let active = true;
-    void fetch(`${API_BASE_URL}/auth/me`, { credentials: 'include' })
+    queueMicrotask(() => {
+      if (active) setFavorites([]);
+    });
+    void apiFetch(`${API_BASE_URL}/auth/me`)
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
       .then((payload: { user: AccountUser | null }) => {
         if (active) setAccountUser(payload.user);
@@ -546,9 +645,7 @@ export function SearchWorkspace() {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session_id');
     if (params.get('checkout') === 'success' && sessionId) {
-      void fetch(`${API_BASE_URL}/billing/verify?session_id=${encodeURIComponent(sessionId)}`, {
-        credentials: 'include',
-      })
+      void apiFetch(`${API_BASE_URL}/billing/verify?session_id=${encodeURIComponent(sessionId)}`)
         .then(async (response) => {
           const payload = (await response.json()) as { user?: AccountUser; message?: string };
           if (!response.ok || !payload.user) throw new Error(payload.message ?? '付款验证失败');
@@ -571,11 +668,38 @@ export function SearchWorkspace() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [accountUser?.id]);
 
   useEffect(() => {
     let active = true;
-    void fetch(`${API_BASE_URL}/favorites`)
+    if (!accountUser) {
+      queueMicrotask(() => {
+        if (active) setAccountHistory([]);
+      });
+      return () => {
+        active = false;
+      };
+    }
+    void apiFetch(`${API_BASE_URL}/history`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
+      .then((payload: { history: Array<{ query: string }> }) => {
+        if (active) setAccountHistory(payload.history.map((item) => item.query).slice(0, 5));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [accountUser]);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        setProjects([]);
+        setSelectedProject(null);
+      }
+    });
+    void apiFetch(`${API_BASE_URL}/favorites`)
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
       .then((payload: { assets: Asset[] }) => {
         if (active) setFavorites(payload.assets);
@@ -584,11 +708,11 @@ export function SearchWorkspace() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [accountUser?.id]);
 
   useEffect(() => {
     let active = true;
-    void fetch(`${API_BASE_URL}/project`)
+    void apiFetch(`${API_BASE_URL}/project`)
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
       .then((payload: { projects: ProjectSummary[] }) => {
         if (active) setProjects(payload.projects);
@@ -637,10 +761,11 @@ export function SearchWorkspace() {
       );
       window.localStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory));
       window.dispatchEvent(new Event('clipflow-history'));
+      if (accountUser) setAccountHistory(nextHistory);
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/search`, {
+      const response = await apiFetch(`${API_BASE_URL}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -718,7 +843,7 @@ export function SearchWorkspace() {
     setNotice(wasFavorite ? '已取消收藏' : '已加入收藏');
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         wasFavorite
           ? `${API_BASE_URL}/favorite/${encodeURIComponent(asset.id)}`
           : `${API_BASE_URL}/favorite`,
@@ -738,7 +863,7 @@ export function SearchWorkspace() {
   }
 
   function recordDownload(asset: Asset) {
-    void fetch(`${API_BASE_URL}/download`, {
+    void apiFetch(`${API_BASE_URL}/download`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(asset),
@@ -748,7 +873,7 @@ export function SearchWorkspace() {
 
   async function createProject(name: string) {
     try {
-      const response = await fetch(`${API_BASE_URL}/project`, {
+      const response = await apiFetch(`${API_BASE_URL}/project`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -765,7 +890,7 @@ export function SearchWorkspace() {
 
   async function selectProject(projectId: string) {
     try {
-      const response = await fetch(`${API_BASE_URL}/project/${encodeURIComponent(projectId)}`);
+      const response = await apiFetch(`${API_BASE_URL}/project/${encodeURIComponent(projectId)}`);
       if (!response.ok) throw new Error();
       const payload = (await response.json()) as { project: Project };
       setSelectedProject(payload.project);
@@ -777,7 +902,7 @@ export function SearchWorkspace() {
   async function deleteProject(project: ProjectSummary) {
     if (!window.confirm(`确定删除项目“${project.name}”吗？项目中的素材归档会被移除。`)) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/project/${encodeURIComponent(project.id)}`, {
+      const response = await apiFetch(`${API_BASE_URL}/project/${encodeURIComponent(project.id)}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error();
@@ -791,7 +916,7 @@ export function SearchWorkspace() {
 
   async function addAssetToProject(projectId: string, asset: Asset) {
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/project/${encodeURIComponent(projectId)}/assets`,
         {
           method: 'POST',
@@ -818,7 +943,7 @@ export function SearchWorkspace() {
 
   async function removeAssetFromProject(projectId: string, asset: Asset) {
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/project/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.id)}`,
         { method: 'DELETE' },
       );
@@ -835,6 +960,87 @@ export function SearchWorkspace() {
       setNotice('素材已从项目移除');
     } catch {
       setNotice('移除失败，请重试');
+    }
+  }
+
+  async function updateProject(projectId: string, name: string, description: string) {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/project/${encodeURIComponent(projectId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description }),
+      });
+      const payload = (await response.json()) as { project?: Project; message?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.message ?? '项目修改失败');
+      setSelectedProject(payload.project);
+      setProjects((current) =>
+        current.map((item) => (item.id === projectId ? payload.project! : item)),
+      );
+      setNotice('项目已更新');
+    } catch (updateError) {
+      setNotice(updateError instanceof Error ? updateError.message : '项目修改失败');
+    }
+  }
+
+  async function addFavoritesToProject(projectId: string, assets: Asset[]) {
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/project/${encodeURIComponent(projectId)}/assets/bulk`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assets }),
+        },
+      );
+      const payload = (await response.json()) as { project?: Project; message?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.message ?? '批量添加失败');
+      setSelectedProject(payload.project);
+      setProjects((current) =>
+        current.map((item) => (item.id === projectId ? payload.project! : item)),
+      );
+      setNotice(`已加入 ${assets.length} 条收藏素材`);
+    } catch (bulkError) {
+      setNotice(bulkError instanceof Error ? bulkError.message : '批量添加失败');
+    }
+  }
+
+  async function clearProjectAssets(projectId: string) {
+    if (!window.confirm('确定清空这个项目中的全部素材吗？')) return;
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/project/${encodeURIComponent(projectId)}/assets`,
+        { method: 'DELETE' },
+      );
+      const payload = (await response.json()) as { project?: Project; message?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.message ?? '清空失败');
+      setSelectedProject(payload.project);
+      setProjects((current) =>
+        current.map((item) => (item.id === projectId ? payload.project! : item)),
+      );
+      setNotice('项目素材已清空');
+    } catch (clearError) {
+      setNotice(clearError instanceof Error ? clearError.message : '清空失败');
+    }
+  }
+
+  async function exportProject(project: Project) {
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/project/${encodeURIComponent(project.id)}/export`,
+      );
+      if (!response.ok) throw new Error('导出失败');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `clipflow-${project.name}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice('项目已导出');
+    } catch {
+      setNotice('项目导出失败');
     }
   }
 
@@ -1039,9 +1245,14 @@ export function SearchWorkspace() {
             projects={projects}
             selectedProject={selectedProject}
             favoriteIds={favoriteIds}
+            favoriteAssets={favorites}
             onCreate={createProject}
             onSelect={(projectId) => void selectProject(projectId)}
             onDelete={(project) => void deleteProject(project)}
+            onUpdate={updateProject}
+            onExport={(project) => void exportProject(project)}
+            onAddFavorites={(projectId, assets) => void addFavoritesToProject(projectId, assets)}
+            onClearAssets={(projectId) => void clearProjectAssets(projectId)}
             onRemoveAsset={(projectId, asset) => void removeAssetFromProject(projectId, asset)}
             onPreview={setSelectedPreview}
             onToggleFavorite={(asset) => void toggleFavorite(asset)}

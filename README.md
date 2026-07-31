@@ -54,3 +54,11 @@ pnpm build
 - 账号默认使用免费版，登录与搜索等基础功能不依赖支付配置
 - 可选 Stripe Checkout 商业版订阅；在 `.env` 填写 `STRIPE_SECRET_KEY`、`STRIPE_PRICE_ID` 和 `STRIPE_WEBHOOK_SECRET` 后启用
 - Stripe 回调地址为 `POST /billing/webhook`，本地联调时需由 Stripe CLI 转发到 `http://localhost:4000/billing/webhook`
+
+## Sprint 5–8 完善
+
+- 单次搜索最多使用 3 组检索词并行查询各素材源，再统一去重和排序；保留继续加载翻页
+- 收藏、下载、搜索历史和项目按登录账号隔离；升级前的本地数据保留在访客空间
+- 项目支持名称与备注编辑、收藏素材批量加入、全部清空和 JSON 导出
+- 免费版限制为 3 个项目、每项目 100 条素材；商业版取消数量限制
+- Stripe Billing Portal 支持用户管理付款方式和取消订阅；订阅取消、更新及续费失败会通过签名 Webhook 自动同步账号权益

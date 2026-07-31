@@ -12,6 +12,9 @@ export interface AccountUser {
   id: string;
   email: string;
   plan: 'free' | 'pro';
+  stripeCustomerId?: string;
+  subscriptionStatus: string;
+  currentPeriodEnd?: string;
   createdAt: string;
 }
 
@@ -30,6 +33,7 @@ export function AccountDialog({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [billingConfigured, setBillingConfigured] = useState(false);
+  const [priceLabel, setPriceLabel] = useState('价格以付款页面为准');
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -47,9 +51,10 @@ export function AccountDialog({
   useEffect(() => {
     void fetch(`${API_BASE_URL}/billing/status`, { credentials: 'include' })
       .then((response) => response.json())
-      .then((payload: { configured?: boolean }) =>
-        setBillingConfigured(Boolean(payload.configured)),
-      )
+      .then((payload: { configured?: boolean; plans?: { pro?: { priceLabel?: string } } }) => {
+        setBillingConfigured(Boolean(payload.configured));
+        if (payload.plans?.pro?.priceLabel) setPriceLabel(payload.plans.pro.priceLabel);
+      })
       .catch(() => setBillingConfigured(false));
   }, []);
 
@@ -97,6 +102,23 @@ export function AccountDialog({
       window.location.assign(payload.url);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '无法连接支付服务');
+      setBusy(false);
+    }
+  }
+
+  async function manageSubscription() {
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/billing/portal`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const payload = (await response.json()) as { url?: string; message?: string };
+      if (!response.ok || !payload.url) throw new Error(payload.message ?? '无法打开订阅管理');
+      window.location.assign(payload.url);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '无法打开订阅管理');
       setBusy(false);
     }
   }
@@ -162,8 +184,9 @@ export function AccountDialog({
                   <Crown size={18} /> 升级商业版
                 </div>
                 <p className="mt-2 text-sm leading-6 text-[var(--primary-ink)]">
-                  为团队协作、更多 AI 搜索能力和后续商业功能预留完整账号权益。
+                  免费版支持 3 个项目、每个项目 100 条素材；商业版项目和素材数量不限。
                 </p>
+                <p className="mt-2 text-sm font-semibold text-[var(--primary-ink)]">{priceLabel}</p>
                 <Button
                   className="mt-4 w-full"
                   onClick={upgrade}
@@ -184,8 +207,24 @@ export function AccountDialog({
                 <div>
                   <p className="font-semibold">商业版已生效</p>
                   <p className="mt-1 text-sm leading-6">你的账号已经完成订阅验证。</p>
+                  {user.currentPeriodEnd && (
+                    <p className="mt-1 text-xs">
+                      当前周期至 {new Date(user.currentPeriodEnd).toLocaleDateString('zh-CN')}
+                    </p>
+                  )}
                 </div>
               </div>
+            )}
+
+            {user.stripeCustomerId && (
+              <Button
+                className="mt-4 w-full"
+                variant="secondary"
+                onClick={manageSubscription}
+                disabled={busy}
+              >
+                管理订阅与付款方式
+              </Button>
             )}
 
             {error && (
