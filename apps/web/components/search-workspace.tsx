@@ -1,6 +1,12 @@
 'use client';
 
-import type { Asset, ProviderStatus, SearchAssetType, SearchResult } from '@clipflow/providers';
+import type {
+  Asset,
+  ProviderName,
+  ProviderStatus,
+  SearchAssetType,
+  SearchResult,
+} from '@clipflow/providers';
 import {
   ArrowUpRight,
   Clock3,
@@ -49,6 +55,10 @@ interface ProjectSummary {
 interface Project extends ProjectSummary {
   assets: Asset[];
 }
+
+type OrientationFilter = 'all' | 'landscape' | 'portrait' | 'square';
+type DurationFilter = 'all' | 'short' | 'medium' | 'long';
+type ResultSort = 'relevance' | 'resolution' | 'duration';
 
 const popularSearches = ['城市航拍夜景', '商务会议握手', '新能源汽车工厂', '咖啡制作特写'];
 const recommendations = [
@@ -563,16 +573,18 @@ function AssetCard({
       <div className="flex items-start justify-between gap-3 px-1 py-3">
         <div className="min-w-0">
           <h3 className="line-clamp-2 text-sm font-semibold text-[var(--ink)]">{asset.title}</h3>
-          <p className="mt-1 truncate text-xs text-[var(--muted)]">{asset.author.name}</p>
+          <p className="mt-1 truncate text-xs text-[var(--muted)]">
+            {asset.author.name} · {asset.width}×{asset.height}
+          </p>
         </div>
         <a
           href={asset.sourceUrl}
           target="_blank"
           rel="noreferrer"
-          className="mt-0.5 shrink-0 text-[var(--muted)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[var(--focus)]"
+          className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[var(--muted)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[var(--focus)]"
           aria-label={`在 ${asset.provider} 查看原始素材`}
         >
-          <ArrowUpRight size={17} />
+          来源与授权 <ArrowUpRight size={15} />
         </a>
       </div>
     </article>
@@ -625,6 +637,10 @@ export function SearchWorkspace() {
   const [notice, setNotice] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountUser, setAccountUser] = useState<AccountUser | null>(null);
+  const [providerFilter, setProviderFilter] = useState<'all' | ProviderName>('all');
+  const [orientationFilter, setOrientationFilter] = useState<OrientationFilter>('all');
+  const [durationFilter, setDurationFilter] = useState<DurationFilter>('all');
+  const [resultSort, setResultSort] = useState<ResultSort>('relevance');
   const controllerRef = useRef<AbortController | null>(null);
   const history = accountUser ? accountHistory : localHistory;
 
@@ -1045,7 +1061,34 @@ export function SearchWorkspace() {
   }
 
   const favoriteIds = new Set(favorites.map((asset) => asset.id));
-  const displayAssets = showFavorites ? favorites : (result?.assets ?? []);
+  const sourceAssets = showFavorites ? favorites : (result?.assets ?? []);
+  const displayAssets = sourceAssets
+    .filter((asset) => providerFilter === 'all' || asset.provider === providerFilter)
+    .filter((asset) => {
+      if (orientationFilter === 'all') return true;
+      const ratio = asset.width / Math.max(asset.height, 1);
+      if (orientationFilter === 'landscape') return ratio > 1.15;
+      if (orientationFilter === 'portrait') return ratio < 0.87;
+      return ratio >= 0.87 && ratio <= 1.15;
+    })
+    .filter((asset) => {
+      if (durationFilter === 'all') return true;
+      if (asset.type !== 'video' || asset.duration === undefined) return false;
+      if (durationFilter === 'short') return asset.duration <= 15;
+      if (durationFilter === 'medium') return asset.duration > 15 && asset.duration <= 60;
+      return asset.duration > 60;
+    })
+    .sort((first, second) => {
+      if (resultSort === 'resolution')
+        return second.width * second.height - first.width * first.height;
+      if (resultSort === 'duration') return (second.duration ?? 0) - (first.duration ?? 0);
+      return (second.score ?? 0) - (first.score ?? 0);
+    });
+  const hasActiveFilters =
+    providerFilter !== 'all' ||
+    orientationFilter !== 'all' ||
+    durationFilter !== 'all' ||
+    resultSort !== 'relevance';
   const hasSearchState = showFavorites || isLoading || result || error;
 
   return (
@@ -1383,6 +1426,87 @@ export function SearchWorkspace() {
                     </div>
                   )}
                   {!showFavorites && isLoading && <SkeletonResults />}
+                  {sourceAssets.length > 0 && (
+                    <div className="mb-6 flex flex-col gap-3 border-b border-[var(--line)] pb-5 lg:flex-row lg:items-end lg:justify-between">
+                      <div className="flex flex-wrap gap-3">
+                        <label className="text-xs font-semibold text-[var(--muted)]">
+                          来源
+                          <select
+                            className="filter-select"
+                            value={providerFilter}
+                            onChange={(event) =>
+                              setProviderFilter(event.target.value as 'all' | ProviderName)
+                            }
+                          >
+                            <option value="all">全部来源</option>
+                            <option value="pexels">Pexels</option>
+                            <option value="pixabay">Pixabay</option>
+                            <option value="unsplash">Unsplash</option>
+                            <option value="giphy">GIPHY</option>
+                          </select>
+                        </label>
+                        <label className="text-xs font-semibold text-[var(--muted)]">
+                          画面方向
+                          <select
+                            className="filter-select"
+                            value={orientationFilter}
+                            onChange={(event) =>
+                              setOrientationFilter(event.target.value as OrientationFilter)
+                            }
+                          >
+                            <option value="all">全部方向</option>
+                            <option value="landscape">横屏</option>
+                            <option value="portrait">竖屏</option>
+                            <option value="square">方形</option>
+                          </select>
+                        </label>
+                        <label className="text-xs font-semibold text-[var(--muted)]">
+                          视频时长
+                          <select
+                            className="filter-select"
+                            value={durationFilter}
+                            onChange={(event) =>
+                              setDurationFilter(event.target.value as DurationFilter)
+                            }
+                          >
+                            <option value="all">全部时长</option>
+                            <option value="short">15 秒以内</option>
+                            <option value="medium">15–60 秒</option>
+                            <option value="long">60 秒以上</option>
+                          </select>
+                        </label>
+                        <label className="text-xs font-semibold text-[var(--muted)]">
+                          排序
+                          <select
+                            className="filter-select"
+                            value={resultSort}
+                            onChange={(event) => setResultSort(event.target.value as ResultSort)}
+                          >
+                            <option value="relevance">相关度</option>
+                            <option value="resolution">清晰度</option>
+                            <option value="duration">视频时长</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-[var(--muted)]">
+                        显示 {displayAssets.length} / {sourceAssets.length}
+                        {hasActiveFilters && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              setProviderFilter('all');
+                              setOrientationFilter('all');
+                              setDurationFilter('all');
+                              setResultSort('relevance');
+                            }}
+                          >
+                            重置筛选
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {displayAssets.length ? (
                     <>
                       <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
@@ -1421,12 +1545,18 @@ export function SearchWorkspace() {
                           <Search size={22} />
                         </div>
                         <h3 className="mt-4 text-lg font-semibold">
-                          {showFavorites ? '还没有收藏素材' : '还没有可展示的素材'}
+                          {hasActiveFilters
+                            ? '没有符合筛选条件的素材'
+                            : showFavorites
+                              ? '还没有收藏素材'
+                              : '还没有可展示的素材'}
                         </h3>
                         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
-                          {showFavorites
-                            ? '在搜索结果中点击心形按钮，素材会保存在这里。'
-                            : '请在根目录的 .env 中配置至少一个 Provider API Key，然后重新启动服务。已配置的平台会自动加入下一次聚合搜索。'}
+                          {hasActiveFilters
+                            ? '调整或重置上方筛选条件，查看其他结果。'
+                            : showFavorites
+                              ? '在搜索结果中点击心形按钮，素材会保存在这里。'
+                              : '请在根目录的 .env 中配置至少一个 Provider API Key，然后重新启动服务。已配置的平台会自动加入下一次聚合搜索。'}
                         </p>
                       </div>
                     )

@@ -41,8 +41,27 @@ body {
   text-rendering: optimizeLegibility;
 }
 button,
-input {
+input,
+select {
   font: inherit;
+}
+
+.filter-select {
+  display: block;
+  min-width: 8.5rem;
+  height: 2.5rem;
+  margin-top: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: white;
+  padding: 0 2rem 0 0.75rem;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.filter-select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
 }
 button {
   cursor: pointer;
