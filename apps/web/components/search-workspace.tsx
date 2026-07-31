@@ -10,21 +10,14 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   Menu,
+  Play,
   Search,
   Settings2,
   Sparkles,
   X,
 } from 'lucide-react';
 import Image from 'next/image';
-import {
-  FormEvent,
-  KeyboardEvent,
-  MouseEvent,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { FormEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -99,128 +92,85 @@ function ProviderBadge({ status }: { status: ProviderStatus }) {
   );
 }
 
-function VideoPreview({ asset }: { asset: Asset }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const seekFrameRef = useRef<number | null>(null);
-  const pendingTimeRef = useRef(0);
-  const [progress, setProgress] = useState(0);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const [duration, setDuration] = useState(asset.duration ?? 0);
-
-  useEffect(
-    () => () => {
-      if (seekFrameRef.current !== null) cancelAnimationFrame(seekFrameRef.current);
-    },
-    [],
-  );
-
-  function seekTo(nextProgress: number) {
-    const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
-
-    const normalizedProgress = Math.min(1, Math.max(0, nextProgress));
-    setProgress(normalizedProgress);
-    pendingTimeRef.current = normalizedProgress * video.duration;
-    if (!video.seeking) video.currentTime = pendingTimeRef.current;
-  }
-
-  async function activatePreview() {
-    setIsPreviewing(true);
-    const video = videoRef.current;
-    if (!video) return;
-    try {
-      await video.play();
-      video.pause();
-    } catch {
-      // Seeking still works when autoplay is unavailable.
-    }
-  }
-
-  function continuePendingSeek() {
-    const video = videoRef.current;
-    if (!video || Math.abs(video.currentTime - pendingTimeRef.current) < 0.04) return;
-    if (seekFrameRef.current !== null) cancelAnimationFrame(seekFrameRef.current);
-    seekFrameRef.current = requestAnimationFrame(() => {
-      if (videoRef.current) videoRef.current.currentTime = pendingTimeRef.current;
-      seekFrameRef.current = null;
-    });
-  }
-
-  function scrubFromMouse(event: MouseEvent<HTMLDivElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    seekTo((event.clientX - bounds.left) / bounds.width);
-  }
-
-  function scrubFromKeyboard(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-    event.preventDefault();
-    setIsPreviewing(true);
-    seekTo(progress + (event.key === 'ArrowRight' ? 0.05 : -0.05));
-  }
-
-  const previewSeconds = Math.round(duration * progress);
+function VideoPreviewDialog({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [onClose]);
 
   return (
     <div
-      className="relative cursor-ew-resize outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-white/90"
-      tabIndex={0}
-      role="slider"
-      aria-label={`${asset.title} 视频预览进度`}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(progress * 100)}
-      aria-valuetext={`${previewSeconds} 秒`}
-      onMouseEnter={() => void activatePreview()}
-      onMouseMove={scrubFromMouse}
-      onMouseLeave={() => setIsPreviewing(false)}
-      onKeyDown={scrubFromKeyboard}
-      onBlur={() => setIsPreviewing(false)}
+      className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`预览 ${asset.title}`}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
-      <video
-        ref={videoRef}
-        src={asset.previewUrl}
-        poster={isPreviewing ? undefined : asset.thumbnailUrl}
-        muted
-        playsInline
-        preload="metadata"
-        aria-hidden="true"
-        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
-        onSeeked={continuePendingSeek}
-        className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
-        style={{ aspectRatio: `${asset.width || 16} / ${asset.height || 9}` }}
-      />
-      <div
-        className={cn(
-          'pointer-events-none absolute inset-x-0 top-0 transition-opacity duration-150',
-          isPreviewing ? 'opacity-100' : 'opacity-0',
-        )}
-      >
-        <div className="h-1 bg-white/35">
-          <div className="h-full bg-white" style={{ width: `${progress * 100}%` }} />
+      <div className="w-full max-w-5xl overflow-hidden rounded-xl bg-[#111] text-white shadow-2xl">
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{asset.title}</p>
+            <p className="mt-0.5 text-xs text-white/65">
+              {asset.provider} · {asset.author.name}
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={onClose}
+            aria-label="关闭视频预览"
+            className="shrink-0 text-white hover:bg-white/10 hover:text-white"
+          >
+            <X size={20} />
+          </Button>
         </div>
-        <span className="absolute left-2 top-2 rounded-md bg-black/65 px-2 py-1 text-[11px] font-semibold text-white">
-          左右移动预览 · {previewSeconds}s
-        </span>
+        <video
+          src={asset.previewUrl}
+          poster={asset.thumbnailUrl}
+          controls
+          autoPlay
+          playsInline
+          className="max-h-[calc(100vh-10rem)] w-full bg-black object-contain"
+        />
       </div>
     </div>
   );
 }
 
-function AssetCard({ asset }: { asset: Asset }) {
+function AssetCard({ asset, onPreview }: { asset: Asset; onPreview: (asset: Asset) => void }) {
   return (
     <article className="group mb-4 break-inside-avoid overflow-hidden rounded-xl bg-white">
       <div className="relative overflow-hidden bg-[var(--surface)]">
-        {asset.type === 'video' ? (
-          <VideoPreview asset={asset} />
-        ) : (
-          <Image
-            src={asset.thumbnailUrl}
-            alt={asset.title}
-            width={asset.width || 800}
-            height={asset.height || 600}
-            unoptimized={asset.type === 'gif'}
-            className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
-          />
+        <Image
+          src={asset.thumbnailUrl}
+          alt={asset.title}
+          width={asset.width || 800}
+          height={asset.height || 600}
+          unoptimized={asset.type === 'gif'}
+          className="h-auto w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
+        />
+        {asset.type === 'video' && (
+          <button
+            type="button"
+            onClick={() => onPreview(asset)}
+            className="absolute inset-0 grid place-items-center bg-black/0 transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-white/90"
+            aria-label={`打开视频预览：${asset.title}`}
+          >
+            <span className="grid size-12 place-items-center rounded-full bg-black/70 text-white shadow-sm transition-transform group-hover:scale-105">
+              <Play size={20} fill="currentColor" />
+            </span>
+          </button>
         )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-linear-to-t from-black/70 to-transparent p-3 pt-10 text-white">
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold capitalize">
@@ -304,6 +254,7 @@ export function SearchWorkspace() {
     page: number;
   } | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [selectedPreview, setSelectedPreview] = useState<Asset | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
@@ -492,6 +443,10 @@ export function SearchWorkspace() {
         </div>
       )}
 
+      {selectedPreview && (
+        <VideoPreviewDialog asset={selectedPreview} onClose={() => setSelectedPreview(null)} />
+      )}
+
       <main id="top">
         <section id="search" className="border-b border-[var(--line)] bg-white">
           <div className="mx-auto max-w-[1120px] px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
@@ -593,7 +548,7 @@ export function SearchWorkspace() {
                 <>
                   <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
                     {result.assets.map((asset) => (
-                      <AssetCard key={asset.id} asset={asset} />
+                      <AssetCard key={asset.id} asset={asset} onPreview={setSelectedPreview} />
                     ))}
                   </div>
                   {hasMore && (
