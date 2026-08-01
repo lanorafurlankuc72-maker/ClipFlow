@@ -21,4 +21,8 @@ services:
       - key: PIXABAY_API_KEY
         sync: false
       - key: AI_PROVIDER
-        value: none
+        value: deepseek
+      - key: DEEPSEEK_MODEL
+        value: deepseek-v4-flash
+      - key: DEEPSEEK_API_KEY
+        sync: false

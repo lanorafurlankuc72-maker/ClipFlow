@@ -4,6 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { analyzeSearchQuery, type SearchAnalysis } from './ai.js';
+import { analyzeVoiceoverWithDeepSeek } from './script-ai.js';
 import {
   authenticateUser,
   currentUser,
@@ -57,6 +58,9 @@ const projectUpdateSchema = projectSchema
   .partial()
   .refine((value) => value.name || value.description !== undefined);
 const bulkAssetsSchema = z.object({ assets: z.array(assetSchema).min(1).max(100) });
+const voiceoverScriptSchema = z.object({
+  script: z.string().trim().min(8, '口播文案至少需要 8 个字符').max(5000),
+});
 
 const credentialsSchema = z.object({
   email: z
@@ -154,6 +158,23 @@ export function createApp(options: CreateAppOptions = {}) {
         };
       }),
     });
+  });
+
+  app.post('/script/analyze', async (request, response, next) => {
+    try {
+      const { script } = voiceoverScriptSchema.parse(request.body);
+      const analysis = await analyzeVoiceoverWithDeepSeek(script);
+      if (!analysis) {
+        response.status(503).json({
+          error: 'ai_unavailable',
+          message: 'DeepSeek 暂时不可用，已切换为本地分析',
+        });
+        return;
+      }
+      response.json(analysis);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/auth/register', (request, response, next) => {

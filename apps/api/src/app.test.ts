@@ -31,6 +31,7 @@ function stripeSignature(body: string, secret = 'whsec_test_secret') {
 describe('ClipFlow API', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it('returns service health', async () => {
@@ -50,6 +51,64 @@ describe('ClipFlow API', () => {
     expect(response.status).toBe(200);
     expect(response.body.providers).toHaveLength(4);
     expect(response.body.assets).toEqual([]);
+  });
+
+  it('returns an AI voiceover breakdown from DeepSeek', async () => {
+    vi.stubEnv('AI_PROVIDER', 'deepseek');
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    segments: [
+                      {
+                        narration: '每一个清晨，都是新的开始。',
+                        duration: 4,
+                        emotion: '温暖',
+                        energy: 3,
+                        shotType: '全景空镜',
+                        visualSuggestion: '清晨阳光洒在城市街道',
+                        keywords: ['清晨', '阳光', '城市街道'],
+                        searchQuery: 'city street sunrise morning',
+                      },
+                    ],
+                    overallEmotion: '温暖',
+                    arc: '渐进上扬',
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+    const response = await request(createTestApp())
+      .post('/script/analyze')
+      .send({ script: '每一个清晨，都是新的开始。' });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      usedAi: true,
+      provider: 'deepseek',
+      overallEmotion: '温暖',
+      totalDuration: 4,
+    });
+    expect(response.body.segments[0].searchQuery).toBe('city street sunrise morning');
+  });
+
+  it('lets the web app fall back when DeepSeek is not configured', async () => {
+    vi.stubEnv('AI_PROVIDER', 'none');
+    vi.stubEnv('DEEPSEEK_API_KEY', '');
+    const response = await request(createTestApp())
+      .post('/script/analyze')
+      .send({ script: '这是一段用于测试的口播文案。' });
+    expect(response.status).toBe(503);
+    expect(response.body.error).toBe('ai_unavailable');
   });
 
   it('persists and removes favorites', async () => {

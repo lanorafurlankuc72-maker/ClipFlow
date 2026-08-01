@@ -5,6 +5,7 @@ import {
   BarChart3,
   Film,
   Image as ImageIcon,
+  LoaderCircle,
   Search,
   Sparkles,
   WandSparkles,
@@ -31,6 +32,8 @@ interface ScriptSegment {
 }
 
 interface ScriptAnalysis {
+  usedAi: boolean;
+  provider: 'deepseek' | null;
   segments: ScriptSegment[];
   totalDuration: number;
   overallEmotion: string;
@@ -40,6 +43,11 @@ interface ScriptAnalysis {
 const SAMPLE_SCRIPT =
   '每一个清晨，都是新的开始。一杯咖啡的温度，让城市在节奏中苏醒。我们穿过忙碌的街道，也为心里的目标留出方向。真正的改变，往往始于一次勇敢的出发。';
 const SCRIPT_STORAGE_KEY = 'clipflow-voiceover-script';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  (process.env.NODE_ENV === 'production'
+    ? 'https://clipflow-api-wgrg.onrender.com'
+    : 'http://localhost:4000');
 
 const visualRules = [
   {
@@ -150,7 +158,7 @@ function analyzeScript(value: string): ScriptAnalysis {
   const first = segments[0]?.energy ?? 3;
   const last = segments.at(-1)?.energy ?? 3;
   const arc = last > first ? '渐进上扬' : last < first ? '由强转缓' : '稳定推进';
-  return { segments, totalDuration, overallEmotion, arc };
+  return { usedAi: false, provider: null, segments, totalDuration, overallEmotion, arc };
 }
 
 function EmotionCurve({ segments }: { segments: ScriptSegment[] }) {
@@ -207,6 +215,7 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
     const saved = window.localStorage.getItem(SCRIPT_STORAGE_KEY) ?? '';
     return saved.trim().length >= 8 ? analyzeScript(saved) : null;
   });
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeId, setActiveId] = useState(1);
   const activeSegment = useMemo(
     () => analysis?.segments.find((segment) => segment.id === activeId) ?? analysis?.segments[0],
@@ -217,10 +226,32 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
     window.localStorage.setItem(SCRIPT_STORAGE_KEY, script);
   }, [script]);
 
-  function runAnalysis() {
-    const next = analyzeScript(script);
-    setAnalysis(next);
-    setActiveId(next.segments[0]?.id ?? 1);
+  async function runAnalysis() {
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/script/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ script }),
+      });
+      if (!response.ok) throw new Error('AI analysis unavailable');
+      const payload = (await response.json()) as Omit<ScriptAnalysis, 'segments'> & {
+        segments: Array<Omit<ScriptSegment, 'id'>>;
+      };
+      const next: ScriptAnalysis = {
+        ...payload,
+        segments: payload.segments.map((segment, index) => ({ ...segment, id: index + 1 })),
+      };
+      setAnalysis(next);
+      setActiveId(next.segments[0]?.id ?? 1);
+    } catch {
+      const next = analyzeScript(script);
+      setAnalysis(next);
+      setActiveId(next.segments[0]?.id ?? 1);
+    } finally {
+      setIsAnalyzing(false);
+    }
   }
 
   return (
@@ -238,6 +269,9 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
             <span className="provider-chip">{analysis.segments.length} 个分镜</span>
             <span className="provider-chip">约 {analysis.totalDuration} 秒</span>
             <span className="provider-chip">{analysis.overallEmotion} · {analysis.arc}</span>
+            <span className="provider-chip">
+              {analysis.usedAi ? 'DeepSeek AI' : '本地分析'}
+            </span>
           </div>
         )}
       </div>
@@ -267,9 +301,18 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
             <span>建议 50–1200 字</span>
             <span>{script.length} / 5000</span>
           </div>
-          <Button className="mt-4 w-full" size="lg" disabled={script.trim().length < 8} onClick={runAnalysis}>
-            <WandSparkles size={18} />
-            拆解文案
+          <Button
+            className="mt-4 w-full"
+            size="lg"
+            disabled={script.trim().length < 8 || isAnalyzing}
+            onClick={() => void runAnalysis()}
+          >
+            {isAnalyzing ? (
+              <LoaderCircle className="animate-spin" size={18} />
+            ) : (
+              <WandSparkles size={18} />
+            )}
+            {isAnalyzing ? 'DeepSeek 分析中…' : '拆解文案'}
           </Button>
         </div>
 

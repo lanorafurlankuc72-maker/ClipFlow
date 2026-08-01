@@ -37,7 +37,7 @@ export async function analyzeSearchQuery(
   const apiKey = isOpenAi ? process.env.OPENAI_API_KEY : process.env.DEEPSEEK_API_KEY;
   const model = isOpenAi
     ? (process.env.OPENAI_MODEL ?? 'gpt-4o-mini')
-    : (process.env.DEEPSEEK_MODEL ?? 'deepseek-chat');
+    : (process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash');
   const endpoint = isOpenAi
     ? 'https://api.openai.com/v1/chat/completions'
     : 'https://api.deepseek.com/chat/completions';
