@@ -31,6 +31,8 @@ pnpm test
 pnpm build
 ```
 
+免费测试部署请按照 [DEPLOYMENT.md](./DEPLOYMENT.md) 操作。
+
 ## Provider 扩展
 
 实现 `SearchProvider` 接口并在 `packages/providers/src/registry.ts` 注册即可。聚合器不依赖具体 Provider 实现。

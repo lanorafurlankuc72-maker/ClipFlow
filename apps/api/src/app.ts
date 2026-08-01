@@ -74,13 +74,16 @@ interface CreateAppOptions {
 
 export function createApp(options: CreateAppOptions = {}) {
   const app = express();
-  const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+  const webOrigins = (process.env.WEB_ORIGIN ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   const database = new ClipFlowDatabase(options.databasePath);
   const analysisCache = new Map<string, SearchAnalysis>();
 
   app.disable('x-powered-by');
   app.use(
-    cors({ origin: webOrigin, methods: ['GET', 'POST', 'PATCH', 'DELETE'], credentials: true }),
+    cors({ origin: webOrigins, methods: ['GET', 'POST', 'PATCH', 'DELETE'], credentials: true }),
   );
 
   app.post(
