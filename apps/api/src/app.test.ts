@@ -75,6 +75,13 @@ describe('ClipFlow API', () => {
                         visualSuggestion: '清晨阳光洒在城市街道',
                         keywords: ['清晨', '阳光', '城市街道'],
                         searchQuery: 'city street sunrise morning',
+                        soundEffects: [
+                          {
+                            type: 'ambient',
+                            label: '清晨城市环境',
+                            searchQuery: 'morning city ambience birds',
+                          },
+                        ],
                       },
                     ],
                     overallEmotion: '温暖',
@@ -99,6 +106,57 @@ describe('ClipFlow API', () => {
       totalDuration: 4,
     });
     expect(response.body.segments[0].searchQuery).toBe('city street sunrise morning');
+    expect(response.body.segments[0].soundEffects[0]).toMatchObject({
+      type: 'ambient',
+      label: '清晨城市环境',
+    });
+  });
+
+  it('searches previewable sound effects with safe licenses', async () => {
+    vi.stubEnv('FREESOUND_API_KEY', 'test-freesound-key');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            count: 1,
+            next: null,
+            results: [
+              {
+                id: 42,
+                name: 'City ambience.wav',
+                duration: 12.4,
+                username: 'field-recorder',
+                license: 'Creative Commons 0',
+                url: 'https://freesound.org/s/42/',
+                tags: ['city', 'traffic'],
+                previews: { 'preview-hq-mp3': 'https://cdn.example.com/city.mp3' },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+    const response = await request(createTestApp())
+      .post('/sound/search')
+      .send({ query: 'city ambience' });
+    expect(response.status).toBe(200);
+    expect(response.body.configured).toBe(true);
+    expect(response.body.sounds[0]).toMatchObject({
+      id: 'freesound-42',
+      license: 'CC0',
+      previewUrl: 'https://cdn.example.com/city.mp3',
+    });
+  });
+
+  it('reports when sound search is not configured', async () => {
+    vi.stubEnv('FREESOUND_API_KEY', '');
+    const response = await request(createTestApp())
+      .post('/sound/search')
+      .send({ query: 'soft whoosh' });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ configured: false, sounds: [] });
   });
 
   it('lets the web app fall back when DeepSeek is not configured', async () => {

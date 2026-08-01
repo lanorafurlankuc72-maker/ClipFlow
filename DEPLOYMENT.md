@@ -7,10 +7,12 @@
 1. 注册并登录 Render，选择 **New → Blueprint**。
 2. 连接 GitHub 仓库 `lanorafurlankuc72-maker/ClipFlow`。
 3. Render 会读取根目录的 `render.yaml` 并创建 `clipflow-api`。
-4. 首次创建时填写素材 API Key。使用 DeepSeek 文案拆解时，再填写 `DEEPSEEK_API_KEY`，并确认 `AI_PROVIDER=deepseek`、`DEEPSEEK_MODEL=deepseek-v4-flash`。Stripe Key 可以留空。
+4. 首次创建时填写素材 API Key。音效搜索需填写 `FREESOUND_API_KEY`。使用 DeepSeek 文案拆解时，再填写 `DEEPSEEK_API_KEY`，并确认 `AI_PROVIDER=deepseek`、`DEEPSEEK_MODEL=deepseek-v4-flash`。Stripe Key 可以留空。
 5. `WEB_ORIGIN` 和 `APP_URL` 暂时填写 `https://example.com`。
 6. 部署完成后复制 Render 地址，例如 `https://clipflow-api.onrender.com`。
 7. 打开 `https://你的Render地址/health`，看到 `status: ok` 表示 API 正常。
+
+Freesound Key 获取位置：登录 Freesound 后打开 `https://freesound.org/apiv2/apply/` 创建 API 凭证，将生成的 key 填入 Render 的 `FREESOUND_API_KEY`。不要把 key 填入 Vercel 或提交到 GitHub。
 
 ## 2. 部署 Vercel 网页
 

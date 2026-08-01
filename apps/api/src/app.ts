@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { analyzeSearchQuery, type SearchAnalysis } from './ai.js';
 import { analyzeVoiceoverWithDeepSeek } from './script-ai.js';
+import { searchSoundEffects } from './sound.js';
 import {
   authenticateUser,
   currentUser,
@@ -60,6 +61,11 @@ const projectUpdateSchema = projectSchema
 const bulkAssetsSchema = z.object({ assets: z.array(assetSchema).min(1).max(100) });
 const voiceoverScriptSchema = z.object({
   script: z.string().trim().min(8, '口播文案至少需要 8 个字符').max(5000),
+});
+const soundSearchSchema = z.object({
+  query: z.string().trim().min(2, '音效搜索至少需要 2 个字符').max(200),
+  page: z.coerce.number().int().min(1).max(100).default(1),
+  perPage: z.coerce.number().int().min(3).max(30).default(12),
 });
 
 const credentialsSchema = z.object({
@@ -172,6 +178,15 @@ export function createApp(options: CreateAppOptions = {}) {
         return;
       }
       response.json(analysis);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/sound/search', async (request, response, next) => {
+    try {
+      const input = soundSearchSchema.parse(request.body);
+      response.json(await searchSoundEffects(input.query, input.page, input.perPage));
     } catch (error) {
       next(error);
     }

@@ -9,6 +9,7 @@ import type {
 } from '@clipflow/providers';
 import {
   ArrowUpRight,
+  AudioLines,
   Clock3,
   Download,
   FileDown,
@@ -34,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AccountDialog, type AccountUser } from '@/components/account-dialog';
 import { ScriptWorkspace } from '@/components/script-workspace';
+import { SoundWorkspace } from '@/components/sound-workspace';
 import { cn } from '@/lib/utils';
 
 const API_BASE_URL =
@@ -637,6 +639,8 @@ export function SearchWorkspace() {
   const [showFavorites, setShowFavorites] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showScriptAnalysis, setShowScriptAnalysis] = useState(false);
+  const [showSounds, setShowSounds] = useState(false);
+  const [soundQuery, setSoundQuery] = useState('');
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projectAsset, setProjectAsset] = useState<Asset | null>(null);
@@ -775,6 +779,7 @@ export function SearchWorkspace() {
       setShowFavorites(false);
       setShowProjects(false);
       setShowScriptAnalysis(false);
+      setShowSounds(false);
     }
 
     if (!append) {
@@ -1115,13 +1120,18 @@ export function SearchWorkspace() {
             <a
               className={cn(
                 'nav-link',
-                !showFavorites && !showProjects && !showScriptAnalysis && 'nav-link-active',
+                !showFavorites &&
+                  !showProjects &&
+                  !showScriptAnalysis &&
+                  !showSounds &&
+                  'nav-link-active',
               )}
               href="#search"
               onClick={() => {
                 setShowFavorites(false);
                 setShowProjects(false);
                 setShowScriptAnalysis(false);
+                setShowSounds(false);
               }}
             >
               搜索
@@ -1133,9 +1143,22 @@ export function SearchWorkspace() {
                 setShowScriptAnalysis(true);
                 setShowFavorites(false);
                 setShowProjects(false);
+                setShowSounds(false);
               }}
             >
               文案拆解
+            </button>
+            <button
+              type="button"
+              className={cn('nav-link', showSounds && 'nav-link-active')}
+              onClick={() => {
+                setShowSounds(true);
+                setShowScriptAnalysis(false);
+                setShowFavorites(false);
+                setShowProjects(false);
+              }}
+            >
+              音效
             </button>
             <button
               type="button"
@@ -1144,6 +1167,7 @@ export function SearchWorkspace() {
                 setShowFavorites(true);
                 setShowProjects(false);
                 setShowScriptAnalysis(false);
+                setShowSounds(false);
               }}
             >
               收藏
@@ -1155,6 +1179,7 @@ export function SearchWorkspace() {
                 setShowProjects(true);
                 setShowFavorites(false);
                 setShowScriptAnalysis(false);
+                setShowSounds(false);
                 if (!selectedProject && projects[0]) void selectProject(projects[0].id);
               }}
             >
@@ -1167,6 +1192,7 @@ export function SearchWorkspace() {
                 setShowScriptAnalysis(false);
                 setShowFavorites(false);
                 setShowProjects(false);
+                setShowSounds(false);
               }}
             >
               历史
@@ -1179,6 +1205,7 @@ export function SearchWorkspace() {
                 setShowFavorites((current) => !current);
                 setShowProjects(false);
                 setShowScriptAnalysis(false);
+                setShowSounds(false);
               }}
             >
               <Heart size={16} fill={showFavorites ? 'currentColor' : 'none'} />
@@ -1194,6 +1221,7 @@ export function SearchWorkspace() {
                 setShowProjects(true);
                 setShowFavorites(false);
                 setShowScriptAnalysis(false);
+                setShowSounds(false);
               }}
             >
               新建项目
@@ -1237,13 +1265,18 @@ export function SearchWorkspace() {
               <a
                 className={cn(
                   'nav-link',
-                  !showFavorites && !showProjects && !showScriptAnalysis && 'nav-link-active',
+                  !showFavorites &&
+                    !showProjects &&
+                    !showScriptAnalysis &&
+                    !showSounds &&
+                    'nav-link-active',
                 )}
                 href="#search"
                 onClick={() => {
                   setShowFavorites(false);
                   setShowProjects(false);
                   setShowScriptAnalysis(false);
+                  setShowSounds(false);
                   setMobileMenuOpen(false);
                 }}
               >
@@ -1256,10 +1289,26 @@ export function SearchWorkspace() {
                   setShowScriptAnalysis(true);
                   setShowFavorites(false);
                   setShowProjects(false);
+                  setShowSounds(false);
                   setMobileMenuOpen(false);
                 }}
               >
                 文案拆解
+              </button>
+              <button
+                type="button"
+                className={cn('nav-link text-left', showSounds && 'nav-link-active')}
+                onClick={() => {
+                  setShowSounds(true);
+                  setShowScriptAnalysis(false);
+                  setShowFavorites(false);
+                  setShowProjects(false);
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <AudioLines size={16} /> 音效搜索
+                </span>
               </button>
               <button
                 type="button"
@@ -1268,6 +1317,7 @@ export function SearchWorkspace() {
                   setShowFavorites(true);
                   setShowProjects(false);
                   setShowScriptAnalysis(false);
+                  setShowSounds(false);
                   setMobileMenuOpen(false);
                 }}
               >
@@ -1280,6 +1330,7 @@ export function SearchWorkspace() {
                   setShowProjects(true);
                   setShowFavorites(false);
                   setShowScriptAnalysis(false);
+                  setShowSounds(false);
                   setMobileMenuOpen(false);
                   if (!selectedProject && projects[0]) void selectProject(projects[0].id);
                 }}
@@ -1293,6 +1344,7 @@ export function SearchWorkspace() {
                   setShowScriptAnalysis(false);
                   setShowFavorites(false);
                   setShowProjects(false);
+                  setShowSounds(false);
                   setMobileMenuOpen(false);
                 }}
               >
@@ -1362,13 +1414,23 @@ export function SearchWorkspace() {
             onToggleFavorite={(asset) => void toggleFavorite(asset)}
             onDownload={recordDownload}
           />
+        ) : showSounds ? (
+          <SoundWorkspace initialQuery={soundQuery} />
         ) : showScriptAnalysis ? (
           <ScriptWorkspace
             onSearch={(nextQuery, nextType) => {
               setQuery(nextQuery);
               setType(nextType);
               setShowScriptAnalysis(false);
+              setShowSounds(false);
               void search(nextQuery, 1, false, nextType);
+            }}
+            onSoundSearch={(nextQuery) => {
+              setSoundQuery(nextQuery);
+              setShowSounds(true);
+              setShowScriptAnalysis(false);
+              setShowFavorites(false);
+              setShowProjects(false);
             }}
           />
         ) : (

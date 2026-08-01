@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   Search,
   Sparkles,
+  Volume2,
   WandSparkles,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -17,6 +18,13 @@ import { cn } from '@/lib/utils';
 
 interface ScriptWorkspaceProps {
   onSearch: (query: string, type: SearchAssetType) => void;
+  onSoundSearch: (query: string) => void;
+}
+
+interface SoundEffectSuggestion {
+  type: 'ambient' | 'action' | 'transition';
+  label: string;
+  searchQuery: string;
 }
 
 interface ScriptSegment {
@@ -29,6 +37,7 @@ interface ScriptSegment {
   visualSuggestion: string;
   keywords: string[];
   searchQuery: string;
+  soundEffects: SoundEffectSuggestion[];
 }
 
 interface ScriptAnalysis {
@@ -101,6 +110,56 @@ const visualRules = [
   },
 ];
 
+const soundRules: Array<{
+  test: RegExp;
+  sounds: SoundEffectSuggestion[];
+}> = [
+  {
+    test: /清晨|早晨|日出|阳光|醒来/,
+    sounds: [
+      { type: 'ambient', label: '清晨城市环境', searchQuery: 'morning city ambience birds' },
+      { type: 'transition', label: '轻柔渐入', searchQuery: 'soft airy whoosh transition' },
+    ],
+  },
+  {
+    test: /咖啡|早餐|杯|温度|餐厅/,
+    sounds: [
+      { type: 'action', label: '咖啡冲煮声', searchQuery: 'coffee machine brewing' },
+      { type: 'action', label: '杯具轻碰', searchQuery: 'ceramic cup clink' },
+      { type: 'ambient', label: '咖啡馆环境', searchQuery: 'quiet cafe ambience' },
+    ],
+  },
+  {
+    test: /城市|街道|通勤|忙碌|人群|节奏/,
+    sounds: [
+      { type: 'ambient', label: '城市交通环境', searchQuery: 'busy city traffic ambience' },
+      { type: 'action', label: '人群脚步声', searchQuery: 'crowd footsteps street' },
+    ],
+  },
+  {
+    test: /科技|产品|智能|数据|未来|创新/,
+    sounds: [
+      { type: 'action', label: '界面点击声', searchQuery: 'clean digital interface click' },
+      { type: 'transition', label: '科技转场', searchQuery: 'futuristic digital whoosh' },
+    ],
+  },
+  {
+    test: /旅行|出发|远方|道路|探索|世界/,
+    sounds: [
+      { type: 'ambient', label: '旷野风声', searchQuery: 'open landscape gentle wind ambience' },
+      { type: 'action', label: '车辆驶过', searchQuery: 'car pass by road' },
+      { type: 'transition', label: '电影感转场', searchQuery: 'cinematic whoosh transition' },
+    ],
+  },
+  {
+    test: /自然|森林|山|海|风|自由|平静/,
+    sounds: [
+      { type: 'ambient', label: '自然环境声', searchQuery: 'peaceful nature ambience wind birds' },
+      { type: 'ambient', label: '树叶风声', searchQuery: 'leaves rustling gentle wind' },
+    ],
+  },
+];
+
 function splitScript(value: string): string[] {
   const sentences = value
     .replace(/\r/g, '')
@@ -122,19 +181,18 @@ function splitScript(value: string): string[] {
 }
 
 function detectEmotion(text: string) {
-  if (/勇敢|突破|成功|目标|坚持|改变|出发|力量/.test(text))
-    return { emotion: '振奋', energy: 5 };
+  if (/勇敢|突破|成功|目标|坚持|改变|出发|力量/.test(text)) return { emotion: '振奋', energy: 5 };
   if (/快乐|笑|美好|惊喜|热爱|活力/.test(text)) return { emotion: '愉悦', energy: 4 };
   if (/忙碌|节奏|速度|追赶|竞争/.test(text)) return { emotion: '紧凑', energy: 4 };
   if (/孤独|遗憾|失去|难过|离开/.test(text)) return { emotion: '低沉', energy: 2 };
-  if (/平静|自然|温柔|清晨|阳光|咖啡|治愈/.test(text))
-    return { emotion: '温暖', energy: 3 };
+  if (/平静|自然|温柔|清晨|阳光|咖啡|治愈/.test(text)) return { emotion: '温暖', energy: 3 };
   return { emotion: '平稳', energy: 3 };
 }
 
 function analyzeScript(value: string): ScriptAnalysis {
   const segments = splitScript(value).map((narration, index): ScriptSegment => {
     const matched = visualRules.find((rule) => rule.test.test(narration));
+    const soundMatched = soundRules.find((rule) => rule.test.test(narration));
     const mood = detectEmotion(narration);
     return {
       id: index + 1,
@@ -146,6 +204,10 @@ function analyzeScript(value: string): ScriptAnalysis {
       visualSuggestion: matched?.visual ?? '选择与口播语义一致的人物或环境画面，保持自然运镜',
       keywords: matched?.keywords ?? ['人物情境', '自然运镜', '电影感'],
       searchQuery: matched?.query ?? 'cinematic lifestyle person natural movement',
+      soundEffects: soundMatched?.sounds ?? [
+        { type: 'ambient', label: '自然环境底噪', searchQuery: 'natural room tone ambience' },
+        { type: 'transition', label: '柔和转场', searchQuery: 'soft whoosh transition' },
+      ],
     };
   });
   const totalDuration = segments.reduce((sum, segment) => sum + segment.duration, 0);
@@ -153,8 +215,7 @@ function analyzeScript(value: string): ScriptAnalysis {
   segments.forEach((segment) =>
     emotionCounts.set(segment.emotion, (emotionCounts.get(segment.emotion) ?? 0) + 1),
   );
-  const overallEmotion =
-    [...emotionCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '平稳';
+  const overallEmotion = [...emotionCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '平稳';
   const first = segments[0]?.energy ?? 3;
   const last = segments.at(-1)?.energy ?? 3;
   const arc = last > first ? '渐进上扬' : last < first ? '由强转缓' : '稳定推进';
@@ -166,7 +227,8 @@ function EmotionCurve({ segments }: { segments: ScriptSegment[] }) {
   const height = 128;
   const points = segments
     .map((segment, index) => {
-      const x = segments.length === 1 ? width / 2 : 18 + (index / (segments.length - 1)) * (width - 36);
+      const x =
+        segments.length === 1 ? width / 2 : 18 + (index / (segments.length - 1)) * (width - 36);
       const y = height - 18 - ((segment.energy - 1) / 4) * (height - 40);
       return `${x},${y}`;
     })
@@ -191,9 +253,20 @@ function EmotionCurve({ segments }: { segments: ScriptSegment[] }) {
           strokeLinecap="round"
         />
         {segments.map((segment, index) => {
-          const x = segments.length === 1 ? width / 2 : 18 + (index / (segments.length - 1)) * (width - 36);
+          const x =
+            segments.length === 1 ? width / 2 : 18 + (index / (segments.length - 1)) * (width - 36);
           const y = height - 18 - ((segment.energy - 1) / 4) * (height - 40);
-          return <circle key={segment.id} cx={x} cy={y} r="4" fill="white" stroke="var(--primary)" strokeWidth="3" />;
+          return (
+            <circle
+              key={segment.id}
+              cx={x}
+              cy={y}
+              r="4"
+              fill="white"
+              stroke="var(--primary)"
+              strokeWidth="3"
+            />
+          );
         })}
       </svg>
       <div className="flex justify-between px-1 text-xs text-[var(--muted)]">
@@ -205,7 +278,7 @@ function EmotionCurve({ segments }: { segments: ScriptSegment[] }) {
   );
 }
 
-export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
+export function ScriptWorkspace({ onSearch, onSoundSearch }: ScriptWorkspaceProps) {
   const [script, setScript] = useState(() => {
     if (typeof window === 'undefined') return '';
     return window.localStorage.getItem(SCRIPT_STORAGE_KEY) ?? '';
@@ -241,7 +314,20 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
       };
       const next: ScriptAnalysis = {
         ...payload,
-        segments: payload.segments.map((segment, index) => ({ ...segment, id: index + 1 })),
+        segments: payload.segments.map((segment, index) => ({
+          ...segment,
+          id: index + 1,
+          soundEffects:
+            segment.soundEffects?.length > 0
+              ? segment.soundEffects
+              : [
+                  {
+                    type: 'ambient',
+                    label: '自然环境底噪',
+                    searchQuery: 'natural room tone ambience',
+                  },
+                ],
+        })),
       };
       setAnalysis(next);
       setActiveId(next.segments[0]?.id ?? 1);
@@ -255,11 +341,16 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
   }
 
   return (
-    <section className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8" aria-labelledby="script-title">
+    <section
+      className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8"
+      aria-labelledby="script-title"
+    >
       <div className="mb-6 flex flex-col gap-3 border-b border-[var(--line)] pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-[var(--primary-ink)]">剪辑前策划</p>
-          <h1 id="script-title" className="mt-1 text-2xl font-bold tracking-[-0.025em]">口播文案拆解</h1>
+          <h1 id="script-title" className="mt-1 text-2xl font-bold tracking-[-0.025em]">
+            口播文案拆解
+          </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">
             把完整口播拆成可执行分镜，并为每段生成画面方向和素材搜索词。
           </p>
@@ -268,10 +359,10 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
           <div className="flex flex-wrap gap-2 text-sm">
             <span className="provider-chip">{analysis.segments.length} 个分镜</span>
             <span className="provider-chip">约 {analysis.totalDuration} 秒</span>
-            <span className="provider-chip">{analysis.overallEmotion} · {analysis.arc}</span>
             <span className="provider-chip">
-              {analysis.usedAi ? 'DeepSeek AI' : '本地分析'}
+              {analysis.overallEmotion} · {analysis.arc}
             </span>
+            <span className="provider-chip">{analysis.usedAi ? 'DeepSeek AI' : '本地分析'}</span>
           </div>
         )}
       </div>
@@ -288,7 +379,9 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
               填入示例
             </button>
           </div>
-          <label htmlFor="voiceover-script" className="sr-only">口播文案</label>
+          <label htmlFor="voiceover-script" className="sr-only">
+            口播文案
+          </label>
           <textarea
             id="voiceover-script"
             value={script}
@@ -337,16 +430,24 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
                     onClick={() => setActiveId(segment.id)}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-bold text-[var(--primary-ink)]">S{segment.id}</span>
-                      <span className="text-xs tabular-nums text-[var(--muted)]">{segment.duration} 秒</span>
+                      <span className="text-sm font-bold text-[var(--primary-ink)]">
+                        S{segment.id}
+                      </span>
+                      <span className="text-xs tabular-nums text-[var(--muted)]">
+                        {segment.duration} 秒
+                      </span>
                     </div>
                     <p className="mt-2 font-semibold leading-6">“{segment.narration}”</p>
-                    <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{segment.visualSuggestion}</p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                      {segment.visualSuggestion}
+                    </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className="provider-chip">{segment.shotType}</span>
                       <span className="provider-chip">{segment.emotion}</span>
                       {segment.keywords.map((keyword) => (
-                        <span key={keyword} className="provider-chip">{keyword}</span>
+                        <span key={keyword} className="provider-chip">
+                          {keyword}
+                        </span>
                       ))}
                     </div>
                   </button>
@@ -354,9 +455,31 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
                     <Button type="button" onClick={() => onSearch(segment.searchQuery, 'video')}>
                       <Film size={16} /> 搜索视频
                     </Button>
-                    <Button type="button" variant="secondary" onClick={() => onSearch(segment.searchQuery, 'image')}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => onSearch(segment.searchQuery, 'image')}
+                    >
                       <ImageIcon size={16} /> 搜索图片
                     </Button>
+                  </div>
+                  <div className="mt-3 px-3">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-[var(--muted)]">
+                      <Volume2 size={14} /> 音效建议
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {segment.soundEffects.map((sound) => (
+                        <button
+                          key={`${sound.type}-${sound.searchQuery}`}
+                          type="button"
+                          onClick={() => onSoundSearch(sound.searchQuery)}
+                          className="provider-chip min-h-9 cursor-pointer border border-transparent transition hover:border-[var(--primary)] hover:text-[var(--primary-ink)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[var(--focus)]"
+                          title={`搜索：${sound.searchQuery}`}
+                        >
+                          {sound.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </article>
               ))}
@@ -405,9 +528,15 @@ export function ScriptWorkspace({ onSearch }: ScriptWorkspaceProps) {
               </dl>
               {activeSegment && (
                 <div className="mt-6 rounded-lg bg-[var(--surface)] p-4">
-                  <p className="text-xs font-semibold text-[var(--muted)]">当前分镜 S{activeSegment.id}</p>
-                  <p className="mt-2 font-semibold">{activeSegment.emotion} · 强度 {activeSegment.energy}/5</p>
-                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{activeSegment.visualSuggestion}</p>
+                  <p className="text-xs font-semibold text-[var(--muted)]">
+                    当前分镜 S{activeSegment.id}
+                  </p>
+                  <p className="mt-2 font-semibold">
+                    {activeSegment.emotion} · 强度 {activeSegment.energy}/5
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    {activeSegment.visualSuggestion}
+                  </p>
                   <button
                     type="button"
                     onClick={() => onSearch(activeSegment.searchQuery, 'video')}
