@@ -20,19 +20,5 @@ services:
         sync: false
       - key: PIXABAY_API_KEY
         sync: false
-      - key: UNSPLASH_ACCESS_KEY
-        sync: false
-      - key: GIPHY_API_KEY
-        sync: false
       - key: AI_PROVIDER
         value: none
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: DEEPSEEK_API_KEY
-        sync: false
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_PRICE_ID
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
