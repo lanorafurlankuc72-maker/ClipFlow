@@ -33,6 +33,7 @@ import { FormEvent, useEffect, useRef, useState, useSyncExternalStore } from 're
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AccountDialog, type AccountUser } from '@/components/account-dialog';
+import { ScriptWorkspace } from '@/components/script-workspace';
 import { cn } from '@/lib/utils';
 
 const API_BASE_URL =
@@ -635,6 +636,7 @@ export function SearchWorkspace() {
   const [favorites, setFavorites] = useState<Asset[]>([]);
   const [showFavorites, setShowFavorites] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
+  const [showScriptAnalysis, setShowScriptAnalysis] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projectAsset, setProjectAsset] = useState<Asset | null>(null);
@@ -772,6 +774,7 @@ export function SearchWorkspace() {
       setHasMore(false);
       setShowFavorites(false);
       setShowProjects(false);
+      setShowScriptAnalysis(false);
     }
 
     if (!append) {
@@ -1110,21 +1113,37 @@ export function SearchWorkspace() {
           </a>
           <nav className="hidden items-center gap-1 md:flex" aria-label="主要导航">
             <a
-              className={cn('nav-link', !showFavorites && !showProjects && 'nav-link-active')}
+              className={cn(
+                'nav-link',
+                !showFavorites && !showProjects && !showScriptAnalysis && 'nav-link-active',
+              )}
               href="#search"
               onClick={() => {
                 setShowFavorites(false);
                 setShowProjects(false);
+                setShowScriptAnalysis(false);
               }}
             >
               搜索
             </a>
             <button
               type="button"
+              className={cn('nav-link', showScriptAnalysis && 'nav-link-active')}
+              onClick={() => {
+                setShowScriptAnalysis(true);
+                setShowFavorites(false);
+                setShowProjects(false);
+              }}
+            >
+              文案拆解
+            </button>
+            <button
+              type="button"
               className={cn('nav-link', showFavorites && 'nav-link-active')}
               onClick={() => {
                 setShowFavorites(true);
                 setShowProjects(false);
+                setShowScriptAnalysis(false);
               }}
             >
               收藏
@@ -1135,12 +1154,21 @@ export function SearchWorkspace() {
               onClick={() => {
                 setShowProjects(true);
                 setShowFavorites(false);
+                setShowScriptAnalysis(false);
                 if (!selectedProject && projects[0]) void selectProject(projects[0].id);
               }}
             >
               项目
             </button>
-            <a className="nav-link" href="#history">
+            <a
+              className="nav-link"
+              href="#history"
+              onClick={() => {
+                setShowScriptAnalysis(false);
+                setShowFavorites(false);
+                setShowProjects(false);
+              }}
+            >
               历史
             </a>
           </nav>
@@ -1150,6 +1178,7 @@ export function SearchWorkspace() {
               onClick={() => {
                 setShowFavorites((current) => !current);
                 setShowProjects(false);
+                setShowScriptAnalysis(false);
               }}
             >
               <Heart size={16} fill={showFavorites ? 'currentColor' : 'none'} />
@@ -1164,6 +1193,7 @@ export function SearchWorkspace() {
               onClick={() => {
                 setShowProjects(true);
                 setShowFavorites(false);
+                setShowScriptAnalysis(false);
               }}
             >
               新建项目
@@ -1205,11 +1235,15 @@ export function SearchWorkspace() {
             </div>
             <div className="flex flex-col gap-2">
               <a
-                className={cn('nav-link', !showFavorites && !showProjects && 'nav-link-active')}
+                className={cn(
+                  'nav-link',
+                  !showFavorites && !showProjects && !showScriptAnalysis && 'nav-link-active',
+                )}
                 href="#search"
                 onClick={() => {
                   setShowFavorites(false);
                   setShowProjects(false);
+                  setShowScriptAnalysis(false);
                   setMobileMenuOpen(false);
                 }}
               >
@@ -1217,10 +1251,23 @@ export function SearchWorkspace() {
               </a>
               <button
                 type="button"
+                className={cn('nav-link text-left', showScriptAnalysis && 'nav-link-active')}
+                onClick={() => {
+                  setShowScriptAnalysis(true);
+                  setShowFavorites(false);
+                  setShowProjects(false);
+                  setMobileMenuOpen(false);
+                }}
+              >
+                文案拆解
+              </button>
+              <button
+                type="button"
                 className={cn('nav-link text-left', showFavorites && 'nav-link-active')}
                 onClick={() => {
                   setShowFavorites(true);
                   setShowProjects(false);
+                  setShowScriptAnalysis(false);
                   setMobileMenuOpen(false);
                 }}
               >
@@ -1232,13 +1279,23 @@ export function SearchWorkspace() {
                 onClick={() => {
                   setShowProjects(true);
                   setShowFavorites(false);
+                  setShowScriptAnalysis(false);
                   setMobileMenuOpen(false);
                   if (!selectedProject && projects[0]) void selectProject(projects[0].id);
                 }}
               >
                 项目
               </button>
-              <a className="nav-link" href="#history">
+              <a
+                className="nav-link"
+                href="#history"
+                onClick={() => {
+                  setShowScriptAnalysis(false);
+                  setShowFavorites(false);
+                  setShowProjects(false);
+                  setMobileMenuOpen(false);
+                }}
+              >
                 历史
               </a>
               <button
@@ -1304,6 +1361,15 @@ export function SearchWorkspace() {
             onPreview={setSelectedPreview}
             onToggleFavorite={(asset) => void toggleFavorite(asset)}
             onDownload={recordDownload}
+          />
+        ) : showScriptAnalysis ? (
+          <ScriptWorkspace
+            onSearch={(nextQuery, nextType) => {
+              setQuery(nextQuery);
+              setType(nextType);
+              setShowScriptAnalysis(false);
+              void search(nextQuery, 1, false, nextType);
+            }}
           />
         ) : (
           <>
