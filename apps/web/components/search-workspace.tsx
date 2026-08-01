@@ -35,7 +35,11 @@ import { Input } from '@/components/ui/input';
 import { AccountDialog, type AccountUser } from '@/components/account-dialog';
 import { cn } from '@/lib/utils';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  (process.env.NODE_ENV === 'production'
+    ? 'https://clipflow-api-wgrg.onrender.com'
+    : 'http://localhost:4000');
 const HISTORY_KEY = 'clipflow-search-history';
 const PAGE_SIZE = 24;
 
