@@ -99,7 +99,7 @@ export function createApp(options: CreateAppOptions = {}) {
   app.post(
     '/billing/webhook',
     express.raw({ type: 'application/json', limit: '128kb' }),
-    (request, response, next) => {
+    async (request, response, next) => {
       try {
         const event = parseStripeWebhook(
           request.body as Buffer,
@@ -108,7 +108,7 @@ export function createApp(options: CreateAppOptions = {}) {
         if (event.type === 'checkout.session.completed' && isPaidSubscription(event.data.object)) {
           const session = event.data.object;
           if (session.client_reference_id && session.subscription) {
-            database.upgradeUser(
+            await database.upgradeUser(
               session.client_reference_id,
               session.customer ?? undefined,
               session.subscription,
@@ -122,7 +122,7 @@ export function createApp(options: CreateAppOptions = {}) {
           ].includes(event.type)
         ) {
           const subscription = event.data.object;
-          database.updateSubscriptionByStripeReference(
+          await database.updateSubscriptionByStripeReference(
             subscription.id,
             subscription.customer ?? undefined,
             event.type === 'customer.subscription.deleted'
@@ -134,7 +134,7 @@ export function createApp(options: CreateAppOptions = {}) {
           );
         } else if (event.type === 'invoice.payment_failed') {
           const invoice = event.data.object;
-          database.updateSubscriptionByStripeReference(
+          await database.updateSubscriptionByStripeReference(
             invoice.subscription ?? undefined,
             invoice.customer ?? undefined,
             'past_due',
@@ -148,8 +148,13 @@ export function createApp(options: CreateAppOptions = {}) {
   );
   app.use(express.json({ limit: '32kb' }));
 
-  app.get('/health', (_request, response) => {
-    response.json({ status: 'ok', service: 'clipflow-api' });
+  app.get('/health', async (_request, response, next) => {
+    try {
+      await database.ready();
+      response.json({ status: 'ok', service: 'clipflow-api', database: 'connected' });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get('/providers', (_request, response) => {
@@ -192,41 +197,50 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.post('/auth/register', (request, response, next) => {
+  app.post('/auth/register', async (request, response, next) => {
     try {
       const input = credentialsSchema.parse(request.body);
-      const user = registerUser(database, input.email, input.password);
-      startSession(database, response, user.id);
+      const user = await registerUser(database, input.email, input.password);
+      await startSession(database, response, user.id);
       response.status(201).json({ user });
     } catch (error) {
       next(error);
     }
   });
 
-  app.post('/auth/login', (request, response, next) => {
+  app.post('/auth/login', async (request, response, next) => {
     try {
       const input = credentialsSchema.parse(request.body);
-      const user = authenticateUser(database, input.email, input.password);
-      startSession(database, response, user.id);
+      const user = await authenticateUser(database, input.email, input.password);
+      await startSession(database, response, user.id);
       response.json({ user });
     } catch (error) {
       next(error);
     }
   });
 
-  app.post('/auth/logout', (request, response) => {
-    endSession(database, request, response);
-    response.json({ success: true });
+  app.post('/auth/logout', async (request, response, next) => {
+    try {
+      await endSession(database, request, response);
+      response.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
   });
 
-  app.get('/auth/me', (request, response) => {
-    response.json({ user: currentUser(database, request) ?? null });
+  app.get('/auth/me', async (request, response, next) => {
+    try {
+      response.json({ user: (await currentUser(database, request)) ?? null });
+    } catch (error) {
+      next(error);
+    }
   });
 
-  app.get('/billing/status', (request, response) => {
+  app.get('/billing/status', async (request, response, next) => {
+    try {
     response.json({
       configured: billingConfigured(),
-      user: currentUser(database, request) ?? null,
+      user: (await currentUser(database, request)) ?? null,
       plans: {
         free: { label: '免费版', projectLimit: 3, assetsPerProject: 100 },
         pro: {
@@ -237,11 +251,14 @@ export function createApp(options: CreateAppOptions = {}) {
         },
       },
     });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/billing/checkout', async (request, response, next) => {
     try {
-      const user = currentUser(database, request);
+      const user = await currentUser(database, request);
       if (!user) {
         response.status(401).json({ error: 'unauthorized', message: '请先登录' });
         return;
@@ -256,7 +273,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.post('/billing/portal', async (request, response, next) => {
     try {
-      const user = currentUser(database, request);
+      const user = await currentUser(database, request);
       if (!user) {
         response.status(401).json({ error: 'unauthorized', message: '请先登录' });
         return;
@@ -277,7 +294,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
   app.get('/billing/verify', async (request, response, next) => {
     try {
-      const user = currentUser(database, request);
+      const user = await currentUser(database, request);
       if (!user) {
         response.status(401).json({ error: 'unauthorized', message: '请先登录' });
         return;
@@ -288,7 +305,7 @@ export function createApp(options: CreateAppOptions = {}) {
         response.status(400).json({ error: 'payment_unverified', message: '暂未确认付款' });
         return;
       }
-      const updatedUser = database.upgradeUser(
+      const updatedUser = await database.upgradeUser(
         user.id,
         session.customer ?? undefined,
         session.subscription!,
@@ -312,7 +329,11 @@ export function createApp(options: CreateAppOptions = {}) {
         queries: analysis.searchQueries,
       });
       if (input.page === 1)
-        database.recordSearch(input.query, analysis.searchQuery, ownerId(database, request));
+        await database.recordSearch(
+          input.query,
+          analysis.searchQuery,
+          await ownerId(database, request),
+        );
       response.json({ ...result, query: input.query, analysis });
     } catch (error) {
       next(error);
@@ -322,90 +343,105 @@ export function createApp(options: CreateAppOptions = {}) {
   app.post('/search', searchHandler);
   app.post('/api/search', searchHandler);
 
-  app.get('/favorites', (request, response) => {
-    response.json({ assets: database.listFavorites(ownerId(database, request)) });
+  app.get('/favorites', async (request, response) => {
+    response.json({ assets: await database.listFavorites(await ownerId(database, request)) });
   });
 
-  app.post('/favorite', (request, response, next) => {
+  app.post('/favorite', async (request, response, next) => {
     try {
       const asset = assetSchema.parse(request.body);
-      response.status(201).json({ asset: database.addFavorite(asset, ownerId(database, request)) });
+      response
+        .status(201)
+        .json({ asset: await database.addFavorite(asset, await ownerId(database, request)) });
     } catch (error) {
       next(error);
     }
   });
 
-  app.delete('/favorite/:assetId', (request, response) => {
+  app.delete('/favorite/:assetId', async (request, response) => {
     const assetId = z.string().min(1).max(300).parse(request.params.assetId);
-    response.json({ removed: database.removeFavorite(assetId, ownerId(database, request)) });
+    response.json({
+      removed: await database.removeFavorite(assetId, await ownerId(database, request)),
+    });
   });
 
-  app.post('/download', (request, response, next) => {
+  app.post('/download', async (request, response, next) => {
     try {
       const asset = assetSchema.parse(request.body);
-      const download = database.recordDownload(asset, ownerId(database, request));
+      const download = await database.recordDownload(asset, await ownerId(database, request));
       response.status(201).json({ download, downloadUrl: asset.contentUrl });
     } catch (error) {
       next(error);
     }
   });
 
-  app.get('/downloads', (request, response) => {
-    response.json({ downloads: database.listDownloads(50, ownerId(database, request)) });
+  app.get('/downloads', async (request, response) => {
+    response.json({ downloads: await database.listDownloads(50, await ownerId(database, request)) });
   });
 
-  app.get('/history', (request, response) => {
-    response.json({ history: database.listSearchHistory(20, ownerId(database, request)) });
+  app.get('/history', async (request, response) => {
+    response.json({ history: await database.listSearchHistory(20, await ownerId(database, request)) });
   });
 
-  app.get('/project', (request, response) => {
-    response.json({ projects: database.listProjects(ownerId(database, request)) });
+  app.get('/project', async (request, response) => {
+    response.json({ projects: await database.listProjects(await ownerId(database, request)) });
   });
 
-  app.post('/project', (request, response, next) => {
+  app.post('/project', async (request, response, next) => {
     try {
       const input = projectSchema.parse(request.body);
-      const user = currentUser(database, request);
+      const user = await currentUser(database, request);
       const userId = user?.id ?? 'guest';
-      if (user?.plan !== 'pro' && database.listProjects(userId).length >= 3) {
+      if (user?.plan !== 'pro' && (await database.listProjects(userId)).length >= 3) {
         response.status(403).json({ error: 'plan_limit', message: '免费版最多创建 3 个项目' });
         return;
       }
-      const project = database.createProject(randomUUID(), input.name, input.description, userId);
+      const project = await database.createProject(
+        randomUUID(),
+        input.name,
+        input.description,
+        userId,
+      );
       response.status(201).json({ project });
     } catch (error) {
       next(error);
     }
   });
 
-  app.get('/project/:projectId', (request, response, next) => {
+  app.get('/project/:projectId', async (request, response, next) => {
     try {
       response.json({
-        project: database.getProject(String(request.params.projectId), ownerId(database, request)),
+        project: await database.getProject(
+          String(request.params.projectId),
+          await ownerId(database, request),
+        ),
       });
     } catch (error) {
       next(error);
     }
   });
 
-  app.delete('/project/:projectId', (request, response) => {
+  app.delete('/project/:projectId', async (request, response) => {
     response.json({
-      removed: database.deleteProject(String(request.params.projectId), ownerId(database, request)),
+      removed: await database.deleteProject(
+        String(request.params.projectId),
+        await ownerId(database, request),
+      ),
     });
   });
 
-  app.patch('/project/:projectId', (request, response, next) => {
+  app.patch('/project/:projectId', async (request, response, next) => {
     try {
-      const current = database.getProject(
+      const current = await database.getProject(
         String(request.params.projectId),
-        ownerId(database, request),
+        await ownerId(database, request),
       );
       const input = projectUpdateSchema.parse(request.body);
-      const project = database.updateProject(
+      const project = await database.updateProject(
         current.id,
         input.name ?? current.name,
         input.description ?? current.description,
-        ownerId(database, request),
+        await ownerId(database, request),
       );
       response.json({ project });
     } catch (error) {
@@ -413,11 +449,11 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.get('/project/:projectId/export', (request, response, next) => {
+  app.get('/project/:projectId/export', async (request, response, next) => {
     try {
-      const project = database.getProject(
+      const project = await database.getProject(
         String(request.params.projectId),
-        ownerId(database, request),
+        await ownerId(database, request),
       );
       response.setHeader(
         'Content-Disposition',
@@ -429,31 +465,35 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.post('/project/:projectId/assets', (request, response, next) => {
+  app.post('/project/:projectId/assets', async (request, response, next) => {
     try {
       const asset = assetSchema.parse(request.body);
-      const userId = ownerId(database, request);
-      const user = currentUser(database, request);
-      const current = database.getProject(String(request.params.projectId), userId);
+      const userId = await ownerId(database, request);
+      const user = await currentUser(database, request);
+      const current = await database.getProject(String(request.params.projectId), userId);
       if (user?.plan !== 'pro' && current.assetCount >= 100) {
         response
           .status(403)
           .json({ error: 'plan_limit', message: '免费版每个项目最多保存 100 条素材' });
         return;
       }
-      const project = database.addProjectAsset(String(request.params.projectId), asset, userId);
+      const project = await database.addProjectAsset(
+        String(request.params.projectId),
+        asset,
+        userId,
+      );
       response.status(201).json({ project });
     } catch (error) {
       next(error);
     }
   });
 
-  app.post('/project/:projectId/assets/bulk', (request, response, next) => {
+  app.post('/project/:projectId/assets/bulk', async (request, response, next) => {
     try {
       const input = bulkAssetsSchema.parse(request.body);
-      const userId = ownerId(database, request);
-      const user = currentUser(database, request);
-      const current = database.getProject(String(request.params.projectId), userId);
+      const userId = await ownerId(database, request);
+      const user = await currentUser(database, request);
+      const current = await database.getProject(String(request.params.projectId), userId);
       const existingIds = new Set(current.assets.map((asset) => asset.id));
       const newAssetCount = new Set(
         input.assets.filter((asset) => !existingIds.has(asset.id)).map((asset) => asset.id),
@@ -465,19 +505,10 @@ export function createApp(options: CreateAppOptions = {}) {
         return;
       }
       response.status(201).json({
-        project: database.addProjectAssets(String(request.params.projectId), input.assets, userId),
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.delete('/project/:projectId/assets', (request, response, next) => {
-    try {
-      response.json({
-        project: database.clearProjectAssets(
+        project: await database.addProjectAssets(
           String(request.params.projectId),
-          ownerId(database, request),
+          input.assets,
+          userId,
         ),
       });
     } catch (error) {
@@ -485,12 +516,25 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.delete('/project/:projectId/assets/:assetId', (request, response, next) => {
+  app.delete('/project/:projectId/assets', async (request, response, next) => {
     try {
-      const project = database.removeProjectAsset(
+      response.json({
+        project: await database.clearProjectAssets(
+          String(request.params.projectId),
+          await ownerId(database, request),
+        ),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/project/:projectId/assets/:assetId', async (request, response, next) => {
+    try {
+      const project = await database.removeProjectAsset(
         String(request.params.projectId),
         String(request.params.assetId),
-        ownerId(database, request),
+        await ownerId(database, request),
       );
       response.json({ project });
     } catch (error) {
@@ -546,6 +590,6 @@ export function createApp(options: CreateAppOptions = {}) {
   return app;
 }
 
-function ownerId(database: ClipFlowDatabase, request: Request): string {
-  return currentUser(database, request)?.id ?? 'guest';
+async function ownerId(database: ClipFlowDatabase, request: Request): Promise<string> {
+  return (await currentUser(database, request))?.id ?? 'guest';
 }

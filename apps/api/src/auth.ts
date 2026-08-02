@@ -8,16 +8,16 @@ const sessionLifetimeSeconds = 60 * 60 * 24 * 30;
 export class EmailAlreadyExistsError extends Error {}
 export class InvalidCredentialsError extends Error {}
 
-export function registerUser(database: ClipFlowDatabase, email: string, password: string) {
+export async function registerUser(database: ClipFlowDatabase, email: string, password: string) {
   const normalizedEmail = email.trim().toLowerCase();
-  if (database.getUserCredentialsByEmail(normalizedEmail)) throw new EmailAlreadyExistsError();
+  if (await database.getUserCredentialsByEmail(normalizedEmail)) throw new EmailAlreadyExistsError();
   const salt = randomBytes(16).toString('hex');
   const hash = hashPassword(password, salt);
   return database.createUser(randomUUID(), normalizedEmail, hash, salt);
 }
 
-export function authenticateUser(database: ClipFlowDatabase, email: string, password: string) {
-  const credentials = database.getUserCredentialsByEmail(email.trim().toLowerCase());
+export async function authenticateUser(database: ClipFlowDatabase, email: string, password: string) {
+  const credentials = await database.getUserCredentialsByEmail(email.trim().toLowerCase());
   if (!credentials) throw new InvalidCredentialsError();
   const actual = Buffer.from(hashPassword(password, credentials.passwordSalt), 'hex');
   const expected = Buffer.from(credentials.passwordHash, 'hex');
@@ -30,10 +30,14 @@ export function authenticateUser(database: ClipFlowDatabase, email: string, pass
   return user;
 }
 
-export function startSession(database: ClipFlowDatabase, response: Response, userId: string): void {
+export async function startSession(
+  database: ClipFlowDatabase,
+  response: Response,
+  userId: string,
+): Promise<void> {
   const token = randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + sessionLifetimeSeconds * 1000).toISOString();
-  database.createSession(hashToken(token), userId, expiresAt);
+  await database.createSession(hashToken(token), userId, expiresAt);
   response.cookie(cookieName, token, {
     httpOnly: true,
     sameSite: 'lax',
@@ -43,13 +47,20 @@ export function startSession(database: ClipFlowDatabase, response: Response, use
   });
 }
 
-export function endSession(database: ClipFlowDatabase, request: Request, response: Response): void {
+export async function endSession(
+  database: ClipFlowDatabase,
+  request: Request,
+  response: Response,
+): Promise<void> {
   const token = readCookie(request, cookieName);
-  if (token) database.deleteSession(hashToken(token));
+  if (token) await database.deleteSession(hashToken(token));
   response.clearCookie(cookieName, { httpOnly: true, sameSite: 'lax', path: '/' });
 }
 
-export function currentUser(database: ClipFlowDatabase, request: Request): UserAccount | undefined {
+export async function currentUser(
+  database: ClipFlowDatabase,
+  request: Request,
+): Promise<UserAccount | undefined> {
   const token = readCookie(request, cookieName);
   return token ? database.getUserBySession(hashToken(token)) : undefined;
 }

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { PostgresClipFlowDatabase } from './postgres-database.js';
 
 export interface SearchHistoryEntry {
   id: number;
@@ -58,7 +59,7 @@ export class ProjectNotFoundError extends Error {
 
 const defaultDatabasePath = fileURLToPath(new URL('../../../data/clipflow.db', import.meta.url));
 
-export class ClipFlowDatabase {
+class SqliteClipFlowDatabase {
   private readonly database: DatabaseSync;
 
   constructor(databasePath = process.env.DATABASE_PATH ?? defaultDatabasePath) {
@@ -480,6 +481,150 @@ export class ClipFlowDatabase {
       )
       .run(projectId, userId);
     if (result.changes === 0) throw new ProjectNotFoundError();
+  }
+}
+
+export class ClipFlowDatabase {
+  private readonly database: SqliteClipFlowDatabase | PostgresClipFlowDatabase;
+
+  constructor(databasePath?: string) {
+    const connectionString = databasePath ? undefined : process.env.DATABASE_URL?.trim();
+    this.database = connectionString
+      ? new PostgresClipFlowDatabase(connectionString)
+      : new SqliteClipFlowDatabase(databasePath);
+  }
+
+  async ready(): Promise<void> {
+    if (this.database instanceof PostgresClipFlowDatabase) await this.database.ready();
+  }
+
+  async createUser(
+    id: string,
+    email: string,
+    passwordHash: string,
+    passwordSalt: string,
+  ): Promise<UserAccount> {
+    return this.database.createUser(id, email, passwordHash, passwordSalt);
+  }
+
+  async getUserCredentialsByEmail(email: string): Promise<UserCredentials | undefined> {
+    return this.database.getUserCredentialsByEmail(email);
+  }
+
+  async getUserById(userId: string): Promise<UserAccount | undefined> {
+    return this.database.getUserById(userId);
+  }
+
+  async createSession(tokenHash: string, userId: string, expiresAt: string): Promise<void> {
+    await this.database.createSession(tokenHash, userId, expiresAt);
+  }
+
+  async getUserBySession(tokenHash: string): Promise<UserAccount | undefined> {
+    return this.database.getUserBySession(tokenHash);
+  }
+
+  async deleteSession(tokenHash: string): Promise<void> {
+    await this.database.deleteSession(tokenHash);
+  }
+
+  async upgradeUser(
+    userId: string,
+    customerId: string | undefined,
+    subscriptionId: string,
+  ): Promise<UserAccount> {
+    return this.database.upgradeUser(userId, customerId, subscriptionId);
+  }
+
+  async updateSubscriptionByStripeReference(
+    subscriptionId: string | undefined,
+    customerId: string | undefined,
+    status: string,
+    currentPeriodEnd?: string,
+  ): Promise<UserAccount | undefined> {
+    return this.database.updateSubscriptionByStripeReference(
+      subscriptionId,
+      customerId,
+      status,
+      currentPeriodEnd,
+    );
+  }
+
+  async addFavorite(asset: Asset, userId = 'guest'): Promise<Asset> {
+    return this.database.addFavorite(asset, userId);
+  }
+
+  async removeFavorite(assetId: string, userId = 'guest'): Promise<boolean> {
+    return this.database.removeFavorite(assetId, userId);
+  }
+
+  async listFavorites(userId = 'guest'): Promise<Asset[]> {
+    return this.database.listFavorites(userId);
+  }
+
+  async recordDownload(asset: Asset, userId = 'guest'): Promise<DownloadEntry> {
+    return this.database.recordDownload(asset, userId);
+  }
+
+  async listDownloads(limit = 50, userId = 'guest'): Promise<DownloadEntry[]> {
+    return this.database.listDownloads(limit, userId);
+  }
+
+  async recordSearch(query: string, searchQuery: string, userId = 'guest'): Promise<void> {
+    await this.database.recordSearch(query, searchQuery, userId);
+  }
+
+  async listSearchHistory(limit = 20, userId = 'guest'): Promise<SearchHistoryEntry[]> {
+    return this.database.listSearchHistory(limit, userId);
+  }
+
+  async createProject(
+    id: string,
+    name: string,
+    description: string,
+    userId = 'guest',
+  ): Promise<Project> {
+    return this.database.createProject(id, name, description, userId);
+  }
+
+  async listProjects(userId = 'guest'): Promise<ProjectSummary[]> {
+    return this.database.listProjects(userId);
+  }
+
+  async getProject(projectId: string, userId = 'guest'): Promise<Project> {
+    return this.database.getProject(projectId, userId);
+  }
+
+  async deleteProject(projectId: string, userId = 'guest'): Promise<boolean> {
+    return this.database.deleteProject(projectId, userId);
+  }
+
+  async addProjectAsset(projectId: string, asset: Asset, userId = 'guest'): Promise<Project> {
+    return this.database.addProjectAsset(projectId, asset, userId);
+  }
+
+  async removeProjectAsset(
+    projectId: string,
+    assetId: string,
+    userId = 'guest',
+  ): Promise<Project> {
+    return this.database.removeProjectAsset(projectId, assetId, userId);
+  }
+
+  async updateProject(
+    projectId: string,
+    name: string,
+    description: string,
+    userId = 'guest',
+  ): Promise<Project> {
+    return this.database.updateProject(projectId, name, description, userId);
+  }
+
+  async addProjectAssets(projectId: string, assets: Asset[], userId = 'guest'): Promise<Project> {
+    return this.database.addProjectAssets(projectId, assets, userId);
+  }
+
+  async clearProjectAssets(projectId: string, userId = 'guest'): Promise<Project> {
+    return this.database.clearProjectAssets(projectId, userId);
   }
 }
 
