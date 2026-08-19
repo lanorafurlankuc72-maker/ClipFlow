@@ -18,6 +18,7 @@ import {
   FolderPlus,
   Heart,
   Image as ImageIcon,
+  LibraryBig,
   LoaderCircle,
   Menu,
   Pencil,
@@ -36,6 +37,7 @@ import { Input } from '@/components/ui/input';
 import { AccountDialog, type AccountUser } from '@/components/account-dialog';
 import { ScriptWorkspace } from '@/components/script-workspace';
 import { SoundWorkspace } from '@/components/sound-workspace';
+import { MaterialSitesWorkspace } from '@/components/material-sites-workspace';
 import { cn } from '@/lib/utils';
 
 const API_BASE_URL =
@@ -66,6 +68,16 @@ interface Project extends ProjectSummary {
 type OrientationFilter = 'all' | 'landscape' | 'portrait' | 'square';
 type DurationFilter = 'all' | 'short' | 'medium' | 'long';
 type ResultSort = 'relevance' | 'resolution' | 'duration';
+type WorkspaceView = 'search' | 'script' | 'sounds' | 'sites' | 'favorites' | 'projects';
+
+const workspaceNavItems = [
+  { id: 'search' as const, label: '素材搜索', icon: Search },
+  { id: 'script' as const, label: '文案拆解', icon: Sparkles },
+  { id: 'sounds' as const, label: '音效搜索', icon: AudioLines },
+  { id: 'sites' as const, label: '素材站点', icon: LibraryBig },
+  { id: 'favorites' as const, label: '我的收藏', icon: Heart },
+  { id: 'projects' as const, label: '剪辑项目', icon: FolderOpen },
+];
 
 const popularSearches = ['城市航拍夜景', '商务会议握手', '新能源汽车工厂', '咖啡制作特写'];
 const recommendations = [
@@ -298,7 +310,7 @@ function ProjectsWorkspace({
   }
 
   return (
-    <section id="projects" className="mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:px-8">
+    <section id="projects" className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
       <div className="flex flex-col gap-5 border-b border-[var(--line)] pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm text-[var(--muted)]">素材工作区</p>
@@ -640,6 +652,7 @@ export function SearchWorkspace() {
   const [showProjects, setShowProjects] = useState(false);
   const [showScriptAnalysis, setShowScriptAnalysis] = useState(false);
   const [showSounds, setShowSounds] = useState(false);
+  const [showMaterialSites, setShowMaterialSites] = useState(false);
   const [soundQuery, setSoundQuery] = useState('');
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -655,6 +668,20 @@ export function SearchWorkspace() {
   const history = accountUser ? accountHistory : localHistory;
 
   useEffect(() => () => controllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileMenuOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [mobileMenuOpen]);
 
   useEffect(() => {
     let active = true;
@@ -1102,265 +1129,166 @@ export function SearchWorkspace() {
     durationFilter !== 'all' ||
     resultSort !== 'relevance';
   const hasSearchState = showFavorites || isLoading || result || error;
+  const activeView: WorkspaceView = showProjects
+    ? 'projects'
+    : showMaterialSites
+      ? 'sites'
+      : showSounds
+        ? 'sounds'
+        : showScriptAnalysis
+          ? 'script'
+          : showFavorites
+            ? 'favorites'
+            : 'search';
+
+  function openView(view: WorkspaceView) {
+    setShowProjects(view === 'projects');
+    setShowSounds(view === 'sounds');
+    setShowMaterialSites(view === 'sites');
+    setShowScriptAnalysis(view === 'script');
+    setShowFavorites(view === 'favorites');
+    setMobileMenuOpen(false);
+    if (view === 'projects' && !selectedProject && projects[0]) {
+      void selectProject(projects[0].id);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-white/95 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-8">
-          <a
-            href="#top"
-            className="flex items-center gap-2.5 font-bold tracking-[-0.02em] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[var(--focus)]"
-          >
-            <span className="grid size-8 place-items-center rounded-lg bg-[var(--primary)] text-white">
-              <Film size={17} aria-hidden="true" />
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)] lg:pl-60">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] p-4 lg:flex">
+        <a
+          href="#top"
+          className="flex h-12 items-center gap-3 rounded-lg px-2 font-bold tracking-[-0.025em] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[var(--focus)]"
+          onClick={() => openView('search')}
+        >
+          <span className="grid size-8 place-items-center rounded-lg bg-[var(--ink)] text-white">
+            <Film size={16} aria-hidden="true" />
+          </span>
+          <span>ClipFlow</span>
+        </a>
+
+        <nav className="mt-7 space-y-1" aria-label="工作区导航">
+          <p className="mb-2 px-3 text-xs font-semibold text-[var(--subtle)]">工作区</p>
+          {workspaceNavItems.map((item) => {
+            const Icon = item.icon;
+            const count = item.id === 'favorites' ? favorites.length : undefined;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn('workspace-nav', activeView === item.id && 'workspace-nav-active')}
+                onClick={() => openView(item.id)}
+              >
+                <Icon
+                  size={17}
+                  fill={item.id === 'favorites' && activeView === item.id ? 'currentColor' : 'none'}
+                />
+                <span>{item.label}</span>
+                {count !== undefined && count > 0 && (
+                  <span className="ml-auto text-xs tabular-nums text-[var(--subtle)]">{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="mt-auto space-y-2 border-t border-[var(--line)] pt-4">
+          <button type="button" className="workspace-nav" onClick={() => setAccountOpen(true)}>
+            <span className="grid size-7 place-items-center rounded-full bg-white text-[var(--muted)] shadow-xs">
+              <UserRound size={15} />
             </span>
-            <span>ClipFlow</span>
-          </a>
-          <nav className="hidden items-center gap-1 md:flex" aria-label="主要导航">
-            <a
-              className={cn(
-                'nav-link',
-                !showFavorites &&
-                  !showProjects &&
-                  !showScriptAnalysis &&
-                  !showSounds &&
-                  'nav-link-active',
-              )}
-              href="#search"
-              onClick={() => {
-                setShowFavorites(false);
-                setShowProjects(false);
-                setShowScriptAnalysis(false);
-                setShowSounds(false);
-              }}
-            >
-              搜索
-            </a>
-            <button
-              type="button"
-              className={cn('nav-link', showScriptAnalysis && 'nav-link-active')}
-              onClick={() => {
-                setShowScriptAnalysis(true);
-                setShowFavorites(false);
-                setShowProjects(false);
-                setShowSounds(false);
-              }}
-            >
-              文案拆解
-            </button>
-            <button
-              type="button"
-              className={cn('nav-link', showSounds && 'nav-link-active')}
-              onClick={() => {
-                setShowSounds(true);
-                setShowScriptAnalysis(false);
-                setShowFavorites(false);
-                setShowProjects(false);
-              }}
-            >
-              音效
-            </button>
-            <button
-              type="button"
-              className={cn('nav-link', showFavorites && 'nav-link-active')}
-              onClick={() => {
-                setShowFavorites(true);
-                setShowProjects(false);
-                setShowScriptAnalysis(false);
-                setShowSounds(false);
-              }}
-            >
-              收藏
-            </button>
-            <button
-              type="button"
-              className={cn('nav-link', showProjects && 'nav-link-active')}
-              onClick={() => {
-                setShowProjects(true);
-                setShowFavorites(false);
-                setShowScriptAnalysis(false);
-                setShowSounds(false);
-                if (!selectedProject && projects[0]) void selectProject(projects[0].id);
-              }}
-            >
-              项目
-            </button>
-            <a
-              className="nav-link"
-              href="#history"
-              onClick={() => {
-                setShowScriptAnalysis(false);
-                setShowFavorites(false);
-                setShowProjects(false);
-                setShowSounds(false);
-              }}
-            >
-              历史
-            </a>
-          </nav>
-          <div className="hidden items-center gap-2 md:flex">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setShowFavorites((current) => !current);
-                setShowProjects(false);
-                setShowScriptAnalysis(false);
-                setShowSounds(false);
-              }}
-            >
-              <Heart size={16} fill={showFavorites ? 'currentColor' : 'none'} />
-              收藏 {favorites.length}
-            </Button>
-            <Button variant="ghost" onClick={() => setAccountOpen(true)}>
-              <UserRound size={17} />
-              {accountUser ? (accountUser.plan === 'pro' ? '商业版' : '账号') : '登录'}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setShowProjects(true);
-                setShowFavorites(false);
-                setShowScriptAnalysis(false);
-                setShowSounds(false);
-              }}
-            >
-              新建项目
-            </Button>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
-            aria-label="打开菜单"
-            onClick={() => setMobileMenuOpen(true)}
-          >
-            <Menu size={20} />
-          </Button>
+            <span className="min-w-0 flex-1 truncate text-left">
+              {accountUser ? accountUser.email : '登录 / 注册'}
+            </span>
+            {accountUser?.plan === 'pro' && (
+              <span className="rounded-full bg-[var(--primary-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--primary-ink)]">
+                PRO
+              </span>
+            )}
+          </button>
         </div>
+      </aside>
+
+      <header className="sticky top-0 z-20 flex h-15 items-center justify-between border-b border-[var(--line)] bg-white/95 px-4 backdrop-blur-sm lg:hidden">
+        <a
+          href="#top"
+          className="flex items-center gap-2.5 font-bold tracking-[-0.025em]"
+          onClick={() => openView('search')}
+        >
+          <span className="grid size-8 place-items-center rounded-lg bg-[var(--ink)] text-white">
+            <Film size={16} />
+          </span>
+          ClipFlow
+        </a>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-11"
+          aria-label="打开菜单"
+          onClick={() => setMobileMenuOpen(true)}
+        >
+          <Menu size={20} />
+        </Button>
       </header>
 
       {mobileMenuOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/25 md:hidden"
-          role="presentation"
+          className="fixed inset-0 z-40 bg-black/30 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="移动端工作区导航"
           onClick={() => setMobileMenuOpen(false)}
         >
           <nav
-            className="ml-auto h-full w-72 bg-white p-5"
+            className="ml-auto flex h-full w-[min(21rem,88vw)] flex-col bg-[var(--sidebar)] p-4 shadow-xl"
             aria-label="移动端导航"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="mb-8 flex items-center justify-between font-bold">
-              ClipFlow
+            <div className="flex h-12 items-center justify-between px-2 font-bold">
+              选择工作区
               <Button
                 variant="ghost"
                 size="icon"
+                className="size-11"
                 aria-label="关闭菜单"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <X size={20} />
               </Button>
             </div>
-            <div className="flex flex-col gap-2">
-              <a
-                className={cn(
-                  'nav-link',
-                  !showFavorites &&
-                    !showProjects &&
-                    !showScriptAnalysis &&
-                    !showSounds &&
-                    'nav-link-active',
-                )}
-                href="#search"
-                onClick={() => {
-                  setShowFavorites(false);
-                  setShowProjects(false);
-                  setShowScriptAnalysis(false);
-                  setShowSounds(false);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                搜索
-              </a>
-              <button
-                type="button"
-                className={cn('nav-link text-left', showScriptAnalysis && 'nav-link-active')}
-                onClick={() => {
-                  setShowScriptAnalysis(true);
-                  setShowFavorites(false);
-                  setShowProjects(false);
-                  setShowSounds(false);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                文案拆解
-              </button>
-              <button
-                type="button"
-                className={cn('nav-link text-left', showSounds && 'nav-link-active')}
-                onClick={() => {
-                  setShowSounds(true);
-                  setShowScriptAnalysis(false);
-                  setShowFavorites(false);
-                  setShowProjects(false);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                <span className="inline-flex items-center gap-2">
-                  <AudioLines size={16} /> 音效搜索
-                </span>
-              </button>
-              <button
-                type="button"
-                className={cn('nav-link text-left', showFavorites && 'nav-link-active')}
-                onClick={() => {
-                  setShowFavorites(true);
-                  setShowProjects(false);
-                  setShowScriptAnalysis(false);
-                  setShowSounds(false);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                收藏 {favorites.length}
-              </button>
-              <button
-                type="button"
-                className={cn('nav-link text-left', showProjects && 'nav-link-active')}
-                onClick={() => {
-                  setShowProjects(true);
-                  setShowFavorites(false);
-                  setShowScriptAnalysis(false);
-                  setShowSounds(false);
-                  setMobileMenuOpen(false);
-                  if (!selectedProject && projects[0]) void selectProject(projects[0].id);
-                }}
-              >
-                项目
-              </button>
-              <a
-                className="nav-link"
-                href="#history"
-                onClick={() => {
-                  setShowScriptAnalysis(false);
-                  setShowFavorites(false);
-                  setShowProjects(false);
-                  setShowSounds(false);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                历史
-              </a>
-              <button
-                type="button"
-                className="nav-link text-left"
-                onClick={() => {
-                  setAccountOpen(true);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                {accountUser ? '我的账号' : '登录 / 注册'}
-              </button>
+            <div className="mt-6 space-y-1">
+              {workspaceNavItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={cn(
+                      'workspace-nav',
+                      activeView === item.id && 'workspace-nav-active',
+                    )}
+                    onClick={() => openView(item.id)}
+                  >
+                    <Icon size={18} />
+                    {item.label}
+                    {item.id === 'favorites' && favorites.length > 0 && (
+                      <span className="ml-auto text-xs tabular-nums">{favorites.length}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
+            <button
+              type="button"
+              className="workspace-nav mt-auto border-t border-[var(--line)] pt-5"
+              onClick={() => {
+                setAccountOpen(true);
+                setMobileMenuOpen(false);
+              }}
+            >
+              <UserRound size={18} />
+              {accountUser ? '我的账号' : '登录 / 注册'}
+            </button>
           </nav>
         </div>
       )}
@@ -1414,6 +1342,8 @@ export function SearchWorkspace() {
             onToggleFavorite={(asset) => void toggleFavorite(asset)}
             onDownload={recordDownload}
           />
+        ) : showMaterialSites ? (
+          <MaterialSitesWorkspace />
         ) : showSounds ? (
           <SoundWorkspace initialQuery={soundQuery} />
         ) : showScriptAnalysis ? (
@@ -1435,72 +1365,87 @@ export function SearchWorkspace() {
           />
         ) : (
           <>
-            <section id="search" className="border-b border-[var(--line)] bg-white">
-              <div className="mx-auto max-w-[1120px] px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
-                <div className="max-w-3xl">
-                  <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-[var(--primary-soft)] px-3 py-1.5 text-sm font-semibold text-[var(--primary-ink)]">
-                    <Sparkles size={15} aria-hidden="true" />
-                    四个平台，一次搜索
+            <section id="search">
+              <div className="mx-auto max-w-[1280px] px-4 pb-7 pt-8 sm:px-6 sm:pb-9 sm:pt-11 lg:px-10">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h1 className="text-3xl font-bold tracking-[-0.035em] sm:text-[2.15rem]">
+                      素材搜索
+                    </h1>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)] sm:text-base">
+                      用一句话描述画面，ClipFlow 会同时检索多个素材库并整理结果。
+                    </p>
                   </div>
-                  <h1 className="text-balance text-4xl font-bold tracking-[-0.035em] sm:text-5xl">
-                    描述你想要的画面，
-                    <br className="hidden sm:block" />
-                    素材搜索从这里开始。
-                  </h1>
-                  <p className="mt-5 max-w-2xl text-pretty text-base leading-7 text-[var(--muted)] sm:text-lg">
-                    同时查询 Pexels、Pixabay、Unsplash 与 GIPHY，统一整理来源与结果。
-                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="hidden w-fit sm:inline-flex"
+                    onClick={() => openView('projects')}
+                  >
+                    <FolderPlus size={16} />
+                    管理项目
+                  </Button>
                 </div>
 
-                <form onSubmit={submit} className="mt-9" aria-label="素材搜索">
-                  <div className="search-shell flex flex-col gap-2 p-2 sm:flex-row">
-                    <div className="relative flex-1">
+                <form onSubmit={submit} className="mt-7" aria-label="素材搜索">
+                  <div className="search-shell flex flex-col gap-2 p-1.5 sm:flex-row sm:items-center">
+                    <div className="relative min-w-0 flex-1">
                       <Search
-                        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--muted)]"
+                        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--subtle)]"
                         size={20}
                       />
                       <Input
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
-                        className="border-0 pl-12 ring-0 focus-visible:ring-0"
-                        placeholder="例如：新能源汽车工厂，航拍，清晨"
+                        className="h-13 border-0 bg-transparent pl-12 pr-3 ring-0 focus-visible:ring-0"
+                        placeholder="例如：清晨的新能源汽车工厂航拍"
                         aria-label="描述需要的素材"
                       />
                     </div>
-                    <Button type="submit" size="lg" disabled={isLoading} className="sm:min-w-28">
+                    <Button
+                      type="submit"
+                      size="lg"
+                      disabled={isLoading}
+                      className="h-11 sm:min-w-28"
+                    >
                       {isLoading ? (
                         <LoaderCircle className="animate-spin" size={18} />
                       ) : (
                         <Search size={18} />
                       )}
-                      {isLoading ? '搜索中' : '搜索'}
+                      {isLoading ? '搜索中' : '开始搜索'}
                     </Button>
                   </div>
-                  <div
-                    className="mt-3 flex flex-wrap items-center gap-2"
-                    role="group"
-                    aria-label="素材类型"
-                  >
-                    {typeOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        aria-pressed={type === option.value}
-                        onClick={() => setType(option.value)}
-                        className={cn(
-                          'filter-button',
-                          type === option.value && 'filter-button-active',
-                        )}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div
+                      className="flex flex-wrap items-center gap-1"
+                      role="group"
+                      aria-label="素材类型"
+                    >
+                      {typeOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          aria-pressed={type === option.value}
+                          onClick={() => setType(option.value)}
+                          className={cn(
+                            'filter-button',
+                            type === option.value && 'filter-button-active',
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-[var(--subtle)]">
+                      Pexels · Pixabay · Unsplash · GIPHY
+                    </p>
                   </div>
                 </form>
               </div>
             </section>
 
-            <div className="mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-[1280px] px-4 pb-14 pt-3 sm:px-6 lg:px-10">
               {hasSearchState ? (
                 <section aria-live="polite">
                   <div className="mb-6 flex flex-col gap-4 border-b border-[var(--line)] pb-5 sm:flex-row sm:items-end sm:justify-between">
@@ -1695,60 +1640,40 @@ export function SearchWorkspace() {
                   )}
                 </section>
               ) : (
-                <div className="grid gap-10 lg:grid-cols-[1.4fr_0.8fr] lg:gap-16">
-                  <section>
+                <div className="grid min-w-0 gap-10 border-t border-[var(--line)] pt-8 lg:grid-cols-[minmax(0,1.45fr)_minmax(220px,0.75fr)] lg:gap-14">
+                  <section className="min-w-0">
                     <div className="flex items-center justify-between">
-                      <h2 className="text-lg font-bold">热门搜索</h2>
-                      <span className="text-sm text-[var(--muted)]">本周</span>
-                    </div>
-                    <div className="mt-4 divide-y divide-[var(--line)] border-y border-[var(--line)]">
-                      {popularSearches.map((item, index) => (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => choosePrompt(item)}
-                          className="group flex w-full items-center justify-between gap-4 py-4 text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[var(--focus)]"
-                        >
-                          <span className="flex items-center gap-4">
-                            <span className="w-5 text-sm tabular-nums text-[var(--muted)]">
-                              {String(index + 1).padStart(2, '0')}
-                            </span>
-                            <span className="font-medium group-hover:text-[var(--primary-ink)]">
-                              {item}
-                            </span>
-                          </span>
-                          <ArrowUpRight
-                            size={17}
-                            className="text-[var(--muted)] transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
-                          />
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="mt-10">
-                      <h2 className="text-lg font-bold">AI 推荐方向</h2>
-                      <div className="mt-4 flex flex-col gap-3">
-                        {recommendations.map((item) => (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => choosePrompt(item.label)}
-                            className="recommendation-row"
-                          >
-                            <span>
-                              <span className="block font-semibold">{item.label}</span>
-                              <span className="mt-1 block text-sm text-[var(--muted)]">
-                                {item.detail}
-                              </span>
-                            </span>
-                            <Sparkles size={17} className="text-[var(--primary-ink)]" />
-                          </button>
-                        ))}
+                      <div>
+                        <h2 className="text-lg font-bold">从这些画面开始</h2>
+                        <p className="mt-1 text-sm text-[var(--muted)]">
+                          点击示例即可立即搜索，也可以自由修改描述。
+                        </p>
                       </div>
+                    </div>
+                    <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                      {[...popularSearches, ...recommendations.map((item) => item.label)].map(
+                        (item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => choosePrompt(item)}
+                            className="quick-prompt group"
+                          >
+                            <span>{item}</span>
+                            <ArrowUpRight
+                              size={16}
+                              className="shrink-0 text-[var(--subtle)] transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+                            />
+                          </button>
+                        ),
+                      )}
                     </div>
                   </section>
 
-                  <aside id="history" className="lg:border-l lg:border-[var(--line)] lg:pl-10">
+                  <aside
+                    id="history"
+                    className="min-w-0 border-t border-[var(--line)] pt-7 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0"
+                  >
                     <div className="flex items-center gap-2">
                       <Clock3 size={18} className="text-[var(--muted)]" />
                       <h2 className="text-lg font-bold">最近搜索</h2>
