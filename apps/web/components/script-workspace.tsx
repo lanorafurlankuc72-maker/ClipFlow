@@ -342,7 +342,7 @@ export function ScriptWorkspace({ onSearch, onSoundSearch }: ScriptWorkspaceProp
 
   return (
     <section
-      className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8"
+      className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-10 lg:py-10"
       aria-labelledby="script-title"
     >
       <div className="mb-6 flex flex-col gap-3 border-b border-[var(--line)] pb-5 sm:flex-row sm:items-end sm:justify-between">

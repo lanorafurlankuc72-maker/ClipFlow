@@ -103,7 +103,7 @@ export function SoundWorkspace({ initialQuery = '' }: SoundWorkspaceProps) {
 
   return (
     <section
-      className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-8"
+      className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10"
       aria-labelledby="sound-title"
     >
       <div className="border-b border-[var(--line)] pb-7">
